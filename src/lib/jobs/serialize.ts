@@ -5,6 +5,7 @@ export function toJobListItem(job: Job): JobListItem {
   return {
     id: job.id,
     title: job.title,
+    niche: job.niche,
     status: job.status,
     phase: job.phase,
     beatCount: job.beatCount,

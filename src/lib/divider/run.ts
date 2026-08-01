@@ -22,6 +22,7 @@ function extractJson(text: string): unknown {
 export async function runScriptDivider(input: {
   script: string;
   phase?: "google-first" | "full";
+  niche?: string | null;
 }): Promise<{
   beats: Beat[];
   result: DividerResult;
@@ -35,7 +36,11 @@ export async function runScriptDivider(input: {
 
   const { model } = getContactBoxConfig();
   const client = createContactBoxClient();
-  const userPrompt = buildDirectorUserPrompt(beats, input.phase ?? "google-first");
+  const userPrompt = buildDirectorUserPrompt(
+    beats,
+    input.phase ?? "google-first",
+    input.niche,
+  );
 
   const completion = await client.chat.completions.create({
     model,

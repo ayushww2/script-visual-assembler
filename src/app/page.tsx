@@ -10,9 +10,27 @@ import {
 
 type NavKey = "new" | "jobs" | "queue";
 
+type NicheOption = {
+  id: string;
+  label: string;
+  version: string;
+  description: string;
+};
+
+const NICHES: NicheOption[] = [
+  {
+    id: "mystery",
+    label: "Mystery",
+    version: "v1",
+    description:
+      "Clean documentary evidence — maps, artifacts, archives, places, soft investigative tone.",
+  },
+];
+
 type JobListItem = {
   id: string;
   title: string | null;
+  niche: string;
   status: string;
   beatCount: number;
   sceneCount: number;
@@ -22,6 +40,11 @@ type JobListItem = {
   progress: string | null;
   createdAt: string;
 };
+
+function nicheLabel(id?: string | null) {
+  const found = NICHES.find((n) => n.id === id);
+  return found ? `${found.label} ${found.version}` : id || "Mystery v1";
+}
 
 type Scene = {
   id: string;
@@ -114,6 +137,7 @@ export default function Home() {
   const [nav, setNav] = useState<NavKey>("new");
   const [script, setScript] = useState("");
   const [title, setTitle] = useState("");
+  const [niche, setNiche] = useState("mystery");
   const [jobs, setJobs] = useState<JobListItem[]>([]);
   const [capacity, setCapacity] = useState<Capacity | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -200,6 +224,7 @@ export default function Home() {
         body: JSON.stringify({
           script,
           title: title.trim() || undefined,
+          niche,
           phase: "google-first",
         }),
       });
@@ -211,6 +236,7 @@ export default function Home() {
       if (json.capacity) setCapacity(json.capacity);
       setScript("");
       setTitle("");
+      setNiche("mystery");
       setSelectedId(null);
       setDetail(null);
       await loadJobs();
@@ -322,6 +348,40 @@ export default function Home() {
                 />
               </Panel>
 
+              <Panel title="Niche">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {NICHES.map((option) => {
+                    const selected = niche === option.id;
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => setNiche(option.id)}
+                        className={`rounded-xl border px-4 py-4 text-left transition ${
+                          selected
+                            ? "border-[var(--blue)] bg-[rgba(59,130,246,0.16)] shadow-[inset_0_0_0_1px_rgba(96,165,250,0.35)]"
+                            : "border-[var(--line)] bg-[var(--panel-2)] hover:border-[rgba(96,165,250,0.4)]"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="font-semibold text-white">
+                            {option.label} {option.version}
+                          </p>
+                          {selected ? (
+                            <span className="text-[11px] font-semibold tracking-wide text-[var(--blue-bright)] uppercase">
+                              Selected
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="mt-2 text-sm leading-relaxed text-[var(--ink-soft)]">
+                          {option.description}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </Panel>
+
               <Panel title="Script">
                 <textarea
                   value={script}
@@ -372,6 +432,9 @@ export default function Home() {
                       <div>
                         <p className="text-base font-semibold text-white">
                           {job.title || "Untitled"}
+                        </p>
+                        <p className="mt-1 text-xs text-[var(--blue-bright)]">
+                          {nicheLabel(job.niche)}
                         </p>
                         <p className="mt-2 text-sm text-[var(--ink-soft)]">
                           {job.progress || "Waiting for cloud worker…"}
@@ -455,6 +518,8 @@ export default function Home() {
                                       {job.title || "Untitled"}
                                     </p>
                                     <p className="mt-1 text-xs text-[var(--ink-soft)]">
+                                      {nicheLabel(job.niche)}
+                                      {" · "}
                                       {job.status === "failed"
                                         ? job.error || "Failed"
                                         : `${job.sceneCount || 0} scenes · ${job.googleCount} Google packs`}
@@ -557,8 +622,8 @@ function JobDetailView({
             {detail.title || "Untitled"}
           </h2>
           <p className="mt-3 text-sm text-[var(--ink-soft)]">
-            {detail.sceneCount || scenes.length} scenes · {detail.googleCount}{" "}
-            Google · {detail.aiCount} AI
+            {nicheLabel(detail.niche)} · {detail.sceneCount || scenes.length}{" "}
+            scenes · {detail.googleCount} Google · {detail.aiCount} AI
             {detail.model ? ` · ${detail.model}` : ""}
           </p>
         </div>

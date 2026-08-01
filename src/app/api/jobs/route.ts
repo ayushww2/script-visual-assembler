@@ -8,6 +8,7 @@ import {
   countTodaysPreviewQueries,
   DAILY_QUERY_SOFT_LIMIT,
 } from "@/lib/jobs/limits";
+import { DEFAULT_NICHE, isValidNiche } from "@/lib/niches";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -41,6 +42,7 @@ export async function POST(req: Request) {
     const body = (await req.json()) as {
       script?: string;
       title?: string;
+      niche?: string;
       phase?: "google-first" | "full";
     };
 
@@ -48,6 +50,8 @@ export async function POST(req: Request) {
     if (!script) {
       return NextResponse.json({ error: "script is required" }, { status: 400 });
     }
+
+    const niche = isValidNiche(body.niche) ? body.niche : DEFAULT_NICHE;
 
     if (script.length > 400_000) {
       return NextResponse.json(
@@ -74,6 +78,7 @@ export async function POST(req: Request) {
     const job = await prisma.job.create({
       data: {
         title: body.title?.trim() || deriveJobTitle(script),
+        niche,
         script,
         phase: body.phase || "google-first",
         status: "queued",

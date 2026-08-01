@@ -17,6 +17,7 @@ export type JobResultPayload = {
 export type JobListItem = {
   id: string;
   title: string | null;
+  niche: string;
   status: string;
   phase: string;
   beatCount: number;

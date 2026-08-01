@@ -49,6 +49,7 @@ export async function processJob(jobId: string): Promise<void> {
       const divided = await runScriptDivider({
         script: job.script,
         phase: (job.phase as "google-first" | "full") || "google-first",
+        niche: job.niche,
       });
 
       await prisma.job.update({

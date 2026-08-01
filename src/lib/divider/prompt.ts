@@ -1,7 +1,8 @@
 import type { Beat } from "./schema";
 import { estimateDurationMinutes } from "./beats";
+import { getNiche } from "@/lib/niches";
 
-export const DIRECTOR_SYSTEM_PROMPT = `You are the DOCUMENTARY DIRECTOR for images-only Mystery YouTube films.
+export const DIRECTOR_SYSTEM_PROMPT = `You are the DOCUMENTARY DIRECTOR for images-only YouTube documentary films.
 
 Your only job:
 1) Decide which visuals should come from GOOGLE IMAGE SEARCH
@@ -145,7 +146,12 @@ OUTPUT JSON ONLY
   ]
 }`;
 
-export function buildDirectorUserPrompt(beats: Beat[], phase: "google-first" | "full" = "google-first"): string {
+export function buildDirectorUserPrompt(
+  beats: Beat[],
+  phase: "google-first" | "full" = "google-first",
+  nicheId?: string | null,
+): string {
+  const niche = getNiche(nicheId);
   const minutes = estimateDurationMinutes(beats);
   const targetStills = Math.round(minutes * 11);
   const targetGoogle = Math.round(targetStills * 0.6);
@@ -170,6 +176,9 @@ Be ruthless about query quality: every googleSearches.query must be something a 
       : `Produce the full Google + AI mix.`;
 
   return `${phaseNote}
+
+SELECTED NICHE: ${niche.label} ${niche.version}
+${niche.promptGuide}
 
 Estimated narration length: ~${minutes.toFixed(1)} minutes
 Target unique stills for the cut: ~${targetStills} (~10–12 / min)

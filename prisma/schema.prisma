@@ -17,6 +17,7 @@ enum JobStatus {
 model Job {
   id             String    @id @default(cuid())
   title          String?
+  niche          String    @default("mystery")
   status         JobStatus @default(queued)
   phase          String    @default("google-first")
   script         String
