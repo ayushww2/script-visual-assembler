@@ -532,6 +532,12 @@ function JobDetailView({
   onBack: () => void;
   onRetry: () => void;
 }) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  function toggleScene(id: string) {
+    setExpandedId((current) => (current === id ? null : id));
+  }
+
   return (
     <div>
       <button
@@ -581,96 +587,138 @@ function JobDetailView({
           Scenes
         </h3>
         <p className="mt-2 text-sm text-[var(--ink-soft)]">
-          Scroll vertically — script on the left, image + URLs on the right.
+          Images stay minimized. Click a scene to maximize it — only one open at
+          a time.
         </p>
 
         {scenes.length === 0 ? (
           <p className="mt-6 text-[var(--ink-soft)]">No scenes yet.</p>
         ) : (
-          <div className="mt-6 space-y-4">
-            {scenes.map((scene) => (
-              <article
-                key={scene.id}
-                id={scene.id}
-                className="fade-rise grid gap-5 rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-4 sm:p-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]"
-              >
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-semibold tracking-[0.16em] text-[var(--blue-bright)] uppercase">
-                      Scene {scene.index}
-                    </span>
-                    <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] uppercase text-[var(--ink-soft)]">
-                      {scene.visualSource}
-                    </span>
-                  </div>
-                  <h4 className="mt-3 font-[family-name:var(--font-fraunces)] text-2xl text-white">
-                    {scene.query ||
-                      scene.subject ||
-                      `Beat ${scene.beatId}`}
-                  </h4>
+          <div className="mt-6 space-y-3">
+            {scenes.map((scene) => {
+              const open = expandedId === scene.id;
+              const thumb = scene.thumbnailUrl || scene.imageUrl;
 
-                  <div className="mt-4 space-y-4">
-                    <Field label="Script part">
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-white/90">
+              return (
+                <article
+                  key={scene.id}
+                  id={scene.id}
+                  className={`fade-rise overflow-hidden rounded-2xl border bg-[var(--panel)] transition ${
+                    open
+                      ? "border-[rgba(96,165,250,0.5)] shadow-[0_14px_36px_rgba(0,0,0,0.3)]"
+                      : "border-[var(--line)]"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleScene(scene.id)}
+                    className="click-row flex w-full items-center gap-4 px-4 py-4 text-left sm:px-5"
+                  >
+                    <div className="h-14 w-20 shrink-0 overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--panel-2)]">
+                      {thumb ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={thumb}
+                          alt=""
+                          className="h-full w-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="flex h-full items-center justify-center text-[10px] uppercase tracking-wide text-[var(--ink-soft)]">
+                          {scene.visualSource}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-semibold tracking-[0.16em] text-[var(--blue-bright)] uppercase">
+                          Scene {scene.index}
+                        </span>
+                        <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] uppercase text-[var(--ink-soft)]">
+                          {scene.visualSource}
+                        </span>
+                      </div>
+                      <p className="mt-1 truncate text-base font-semibold text-white">
+                        {scene.query ||
+                          scene.subject ||
+                          `Beat ${scene.beatId}`}
+                      </p>
+                      <p className="mt-1 line-clamp-1 text-xs text-[var(--ink-soft)]">
                         {scene.scriptText}
                       </p>
-                    </Field>
-                    {scene.entityContext ? (
-                      <Field label="Visual context">
-                        <p className="text-sm text-white/85">
-                          {scene.entityContext}
-                        </p>
-                      </Field>
-                    ) : null}
-                    {scene.why ? (
-                      <Field label="Why this source">
-                        <p className="text-sm text-white/85">{scene.why}</p>
-                      </Field>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-3 sm:p-4">
-                  {scene.thumbnailUrl || scene.imageUrl ? (
-                    <div className="overflow-hidden rounded-lg border border-[var(--line)] bg-black/30">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={scene.thumbnailUrl || scene.imageUrl || ""}
-                        alt={scene.query || `Scene ${scene.index}`}
-                        className="aspect-video w-full object-cover"
-                        loading="lazy"
-                      />
                     </div>
-                  ) : (
-                    <div className="flex aspect-video items-center justify-center rounded-lg border border-dashed border-[var(--line)] bg-black/20 text-sm text-[var(--ink-soft)]">
-                      {scene.visualSource === "ai"
-                        ? "AI still — no Google image"
-                        : "No image preview"}
-                    </div>
-                  )}
 
-                  <div className="mt-4 space-y-3">
-                    <Field label="Image URL">
-                      <UrlOrEmpty value={scene.imageUrl} />
-                    </Field>
-                    <Field label="Source URL">
-                      <UrlOrEmpty value={scene.sourceUrl} />
-                    </Field>
-                    <Field label="R2 URL">
-                      <UrlOrEmpty
-                        value={scene.r2Url}
-                        empty="Not uploaded yet"
-                      />
-                    </Field>
-                    <Field label="Email">
-                      <p className="text-sm text-[var(--ink-soft)]">
-                        {scene.email || "—"}
-                      </p>
-                    </Field>
-                  </div>
-                </div>
-              </article>
-            ))}
+                    <span className="shrink-0 text-xs font-semibold text-[var(--blue-bright)]">
+                      {open ? "Minimize" : "Maximize →"}
+                    </span>
+                  </button>
+
+                  {open ? (
+                    <div className="grid gap-5 border-t border-[var(--line)] px-4 py-5 sm:px-5 lg:grid-cols-[minmax(0,1.05fr)_minmax(280px,0.95fr)]">
+                      <div className="min-w-0 space-y-4">
+                        <Field label="Script part">
+                          <p className="whitespace-pre-wrap text-sm leading-relaxed text-white/90">
+                            {scene.scriptText}
+                          </p>
+                        </Field>
+                        {scene.entityContext ? (
+                          <Field label="Visual context">
+                            <p className="text-sm text-white/85">
+                              {scene.entityContext}
+                            </p>
+                          </Field>
+                        ) : null}
+                        {scene.why ? (
+                          <Field label="Why this source">
+                            <p className="text-sm text-white/85">{scene.why}</p>
+                          </Field>
+                        ) : null}
+                      </div>
+
+                      <div className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-3 sm:p-4">
+                        {thumb ? (
+                          <div className="overflow-hidden rounded-lg border border-[var(--line)] bg-black/30">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={thumb}
+                              alt={scene.query || `Scene ${scene.index}`}
+                              className="aspect-video w-full object-cover"
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex aspect-video items-center justify-center rounded-lg border border-dashed border-[var(--line)] bg-black/20 text-sm text-[var(--ink-soft)]">
+                            {scene.visualSource === "ai"
+                              ? "AI still — no Google image"
+                              : "No image preview"}
+                          </div>
+                        )}
+
+                        <div className="mt-4 space-y-3">
+                          <Field label="Image URL">
+                            <UrlOrEmpty value={scene.imageUrl} />
+                          </Field>
+                          <Field label="Source URL">
+                            <UrlOrEmpty value={scene.sourceUrl} />
+                          </Field>
+                          <Field label="R2 URL">
+                            <UrlOrEmpty
+                              value={scene.r2Url}
+                              empty="Not uploaded yet"
+                            />
+                          </Field>
+                          <Field label="Email">
+                            <p className="text-sm text-[var(--ink-soft)]">
+                              {scene.email || "—"}
+                            </p>
+                          </Field>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
           </div>
         )}
       </div>
