@@ -48,4 +48,9 @@ export const MYSTERY_DEFAULT_NEGATIVE = [
   "distorted hands",
   "distorted faces",
   "illegible gibberish typography",
+  "empty interview chair",
+  "vacant armchair",
+  "tabletop audio recorder prop",
+  "printed notes on table cliché",
+  "empty studio set between takes",
 ].join(", ");

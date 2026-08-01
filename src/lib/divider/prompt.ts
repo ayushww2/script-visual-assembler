@@ -83,6 +83,13 @@ For each AI item:
 
 AI must look real, documentary, naturally imperfect — never fantasy glow / proof-fake.
 
+HARD BAN for AI visualIdea (never use these lazy props):
+- vacant / empty interview chairs, armchairs, empty seats
+- tabletop audio recorders, printed notes “between takes”, empty studio sets
+For abstract “serious / tension / pause” beats: use a real environmental still
+(place, weather, archive, landscape) — or better, assign GOOGLE to the named
+person in the film looking serious. Never an empty chair.
+
 ────────────────────────────────
 OUTPUT JSON ONLY
 ────────────────────────────────

@@ -17,6 +17,10 @@ import {
   repairMisplacedAiToGoogle,
 } from "@/lib/jobs/repairGoogleFirst";
 import {
+  isChairClicheAiScene,
+  repairChairClicheAiScenes,
+} from "@/lib/jobs/repairAiCliche";
+import {
   mapPartsParallel,
   PARALLEL_PARTS,
 } from "@/lib/jobs/parallelParts";
@@ -79,6 +83,7 @@ export async function processJob(jobId: string): Promise<void> {
         let scenes = job.scenesJson as unknown as SceneRecord[];
         const dirtyGoogle = scenes.filter((s) => isBadGoogleScenePick(s)).length;
         const misplacedAi = scenes.filter((s) => isMisplacedAiScene(s)).length;
+        const chairCliche = scenes.filter((s) => isChairClicheAiScene(s)).length;
         const missing = scenes.filter((s) => !s.imageUrl?.trim()).length;
 
         await prisma.job.update({
@@ -91,8 +96,8 @@ export async function processJob(jobId: string): Promise<void> {
             packageUrl: null,
             packageError: null,
             progress:
-              dirtyGoogle > 0 || misplacedAi > 0
-                ? `Repair sources · ${dirtyGoogle} dirty Google · ${misplacedAi} AI→Google · then ${missing} AI…`
+              dirtyGoogle > 0 || misplacedAi > 0 || chairCliche > 0
+                ? `Repair sources · ${dirtyGoogle} dirty Google · ${misplacedAi} AI→Google · ${chairCliche} chair cliché · then ${missing} AI…`
                 : job.aiBatch
                   ? `Resuming AI Batch${job.aiBatchId ? ` ${job.aiBatchId}` : ""}…`
                   : `Resuming AI stills · ${missing} remaining…`,
@@ -131,6 +136,26 @@ export async function processJob(jobId: string): Promise<void> {
               googleCount: counts.google,
               aiCount: counts.ai,
               progress: `Google-first · converted ${converted.repaired}/${misplacedAi} AI→Google`,
+            },
+          });
+        }
+
+        // Kill empty-chair / vacant-interview AI clichés
+        if (chairCliche > 0) {
+          const chairs = await repairChairClicheAiScenes({
+            scenes,
+            title: job.title,
+            onProgress,
+          });
+          scenes = chairs.scenes;
+          const counts = countSources(scenes);
+          await prisma.job.update({
+            where: { id: jobId },
+            data: {
+              scenesJson: scenes as unknown as Prisma.InputJsonValue,
+              googleCount: counts.google,
+              aiCount: counts.ai,
+              progress: `Chair-cliché · replaced ${chairs.repaired}/${chairCliche}`,
             },
           });
         }

@@ -119,13 +119,31 @@ export function fallbackMysteryImagePrompt(input: {
  * Fast local Mystery realism prompt (no ContactBox).
  * Keeps the locked documentary look; uses director visualIdea + narration.
  */
+const CHAIR_CLICHE =
+  /\b(vacant (interview )?chair|empty chair|interview chair|armchair|audio recorder|zoom recorder|printed notes|interview set|empty seat)\b/i;
+
+/** Rewrite lazy empty-chair ideas into real environmental documentary stills. */
+export function sanitizeAiVisualIdea(visualIdea: string, words?: string): string {
+  const idea = (visualIdea || "").trim();
+  if (!CHAIR_CLICHE.test(idea)) return idea;
+  const cue = (words || "").trim().slice(0, 120);
+  return (
+    "documentary realism of an overcast limestone hillside outside an ancient city, " +
+    "sparse vegetation and quiet empty middle distance, no furniture, no interior set" +
+    (cue ? ` — mood for: ${cue}` : "")
+  );
+}
+
 export function composeMysteryImagePrompt(input: {
   visualIdea: string;
   subject?: string;
   title?: string;
   words?: string;
 }): string {
-  const idea = (input.visualIdea || input.subject || "documentary field still").trim();
+  const idea = sanitizeAiVisualIdea(
+    input.visualIdea || input.subject || "documentary field still",
+    input.words,
+  );
   const subject = (input.subject || "").trim();
   const words = (input.words || "").trim().slice(0, 220);
   const title = (input.title || "").trim();
@@ -138,6 +156,7 @@ export function composeMysteryImagePrompt(input: {
     words ? `Narration cue (do not render as text): ${words}` : "",
     "Real human-captured field / archive / lab / shoreline still, slightly imperfect: natural grain, soft optics, mild haze, uneven exposure.",
     "Natural daylight or overcast documentary light. Realistic materials and scale. Functional framing, not poster composition.",
+    "Never show empty interview chairs, vacant armchairs, tabletop recorders, or staged empty studio sets.",
     MYSTERY_REALISM_LOCK,
     `Avoid: ${MYSTERY_DEFAULT_NEGATIVE}`,
   ]
