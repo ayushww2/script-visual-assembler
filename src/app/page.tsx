@@ -4,7 +4,9 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
+  type DragEvent,
   type ReactNode,
 } from "react";
 
@@ -162,8 +164,12 @@ export default function Home() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<JobDetail | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [uploadingDocx, setUploadingDocx] = useState(false);
+  const [docxName, setDocxName] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openDays, setOpenDays] = useState<Record<string, boolean>>({});
+  const docxInputRef = useRef<HTMLInputElement>(null);
 
   const dayGroups = useMemo(() => groupJobsByDay(jobs), [jobs]);
   const queueJobs = useMemo(
@@ -233,6 +239,46 @@ export default function Home() {
 
   const scenes = detail?.scenes || [];
 
+  async function ingestDocx(file: File) {
+    setUploadingDocx(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/script/docx", {
+        method: "POST",
+        body: form,
+      });
+      const json = (await res.json()) as {
+        text?: string;
+        titleSuggestion?: string;
+        filename?: string;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(json.error || "Failed to read DOCX");
+      if (!json.text?.trim()) throw new Error("No text found in DOCX");
+
+      setScript(json.text);
+      setDocxName(json.filename || file.name);
+      if (!title.trim() && json.titleSuggestion) {
+        setTitle(json.titleSuggestion);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to read DOCX");
+    } finally {
+      setUploadingDocx(false);
+      if (docxInputRef.current) docxInputRef.current.value = "";
+    }
+  }
+
+  function onDocxDrop(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    void ingestDocx(file);
+  }
+
   async function submitJob() {
     setSubmitting(true);
     setError(null);
@@ -256,6 +302,7 @@ export default function Home() {
       setScript("");
       setTitle("");
       setNiche("mystery");
+      setDocxName(null);
       setSelectedId(null);
       setDetail(null);
       await loadJobs();
@@ -405,10 +452,65 @@ export default function Home() {
               </Panel>
 
               <Panel title="Script">
+                <div
+                  onDragEnter={(e) => {
+                    e.preventDefault();
+                    setDragOver(true);
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDragOver(true);
+                  }}
+                  onDragLeave={(e) => {
+                    e.preventDefault();
+                    setDragOver(false);
+                  }}
+                  onDrop={onDocxDrop}
+                  className={`mb-4 rounded-xl border border-dashed px-4 py-6 text-center transition ${
+                    dragOver
+                      ? "border-[var(--blue)] bg-[rgba(59,130,246,0.14)]"
+                      : "border-[var(--line)] bg-[var(--panel-2)]"
+                  }`}
+                >
+                  <p className="text-sm font-semibold text-white">
+                    {uploadingDocx
+                      ? "Reading DOCX…"
+                      : "Drag & drop a .docx script"}
+                  </p>
+                  <p className="mt-1 text-xs text-[var(--ink-soft)]">
+                    We’ll extract the text, then break it into scenes on submit.
+                  </p>
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+                    <button
+                      type="button"
+                      disabled={uploadingDocx}
+                      onClick={() => docxInputRef.current?.click()}
+                      className="rounded-lg border border-[var(--line)] bg-black/20 px-4 py-2 text-sm font-semibold text-white transition hover:border-[var(--blue)] disabled:opacity-45"
+                    >
+                      Choose .docx
+                    </button>
+                    {docxName ? (
+                      <span className="max-w-[220px] truncate text-xs text-[var(--blue-bright)]">
+                        Loaded: {docxName}
+                      </span>
+                    ) : null}
+                  </div>
+                  <input
+                    ref={docxInputRef}
+                    type="file"
+                    accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) void ingestDocx(file);
+                    }}
+                  />
+                </div>
+
                 <textarea
                   value={script}
                   onChange={(e) => setScript(e.target.value)}
-                  placeholder="Paste the full documentary script or Whisper JSON…"
+                  placeholder="Paste the full documentary script, Whisper JSON, or upload a .docx above…"
                   className="min-h-[280px] w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--panel-2)] px-4 py-3 text-sm leading-relaxed text-white outline-none placeholder:text-[var(--ink-soft)]/55 focus:border-[var(--blue)]"
                 />
               </Panel>
@@ -416,7 +518,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={submitJob}
-                disabled={submitting || !script.trim()}
+                disabled={submitting || uploadingDocx || !script.trim()}
                 className="rounded-xl bg-[var(--blue)] px-6 py-3.5 text-sm font-semibold text-white shadow-[0_10px_28px_rgba(37,99,235,0.35)] transition hover:bg-[var(--blue-deep)] hover:shadow-[0_14px_34px_rgba(37,99,235,0.45)] disabled:opacity-45 disabled:shadow-none"
               >
                 {submitting ? "Submitting…" : "Submit job"}
