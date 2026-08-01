@@ -117,15 +117,17 @@ export async function generateMissingAiStills(input: {
   // Re-attach any AI stills already on R2 from a prior interrupted run.
   let scenes = input.scenes;
   let reattached = 0;
-  const hydrated = await Promise.all(
+  const hydrated: SceneRecord[] = await Promise.all(
     scenes.map(async (s) => {
       if (s.imageUrl?.trim()) return s;
       const url = await existingStillUrl(input.jobId, s.index);
       if (!url) return s;
       reattached += 1;
+      const visualSource: SceneRecord["visualSource"] =
+        s.visualSource === "google" ? "google" : "ai";
       return {
         ...s,
-        visualSource: s.visualSource === "google" ? "google" : ("ai" as const),
+        visualSource,
         imageUrl: url,
         thumbnailUrl: url,
         r2Url: url,
