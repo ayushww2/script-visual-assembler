@@ -13,9 +13,9 @@ export type RepairProgress = (message: string) => Promise<void> | void;
 const CHAIR_CLICHE =
   /\b(vacant (interview )?chair|empty chair|interview chair|armchair|zoom recorder|audio recorder beside|interview set between takes|empty seat beside|recorder and (printed )?notes|vacant interview|director'?s?\s*(empty\s*)?chair|director chair|folding chair)\b/i;
 
-/** Abstract “serious” beats → prefer the film’s person over empty props. */
+/** Abstract “serious” / production beats → prefer the film’s person over empty props. */
 const SERIOUS_PERSON_BEAT =
-  /\b(serious|raising eyebrows|so serious|investigative pause)\b/i;
+  /\b(serious|raising eyebrows|so serious|investigative pause|budget|financ|storyboard|creative control|unusual control|languages, imagery)\b/i;
 
 export function isChairClicheAiScene(scene: SceneRecord): boolean {
   if (scene.visualSource !== "ai") return false;
