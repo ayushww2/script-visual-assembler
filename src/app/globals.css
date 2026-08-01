@@ -1,15 +1,16 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #05070b;
-  --bg-elevated: #0b1018;
-  --bg-panel: #0e1520;
-  --ink: #f4f7fb;
-  --ink-soft: #9aa8bc;
-  --line: rgba(148, 163, 184, 0.16);
+  --bg: #07090f;
+  --sidebar: #0a0d14;
+  --panel: #101522;
+  --panel-2: #141b2b;
+  --ink: #f5f7fb;
+  --ink-soft: #95a0b5;
+  --line: rgba(148, 163, 184, 0.14);
   --blue: #3b82f6;
   --blue-bright: #60a5fa;
-  --blue-deep: #1d4ed8;
+  --blue-deep: #2563eb;
   --danger: #f87171;
   --ok: #34d399;
 }
@@ -34,11 +35,7 @@ body {
   margin: 0;
   color: var(--ink);
   font-family: var(--font-figtree), sans-serif;
-  background:
-    radial-gradient(900px 500px at 12% -10%, rgba(59, 130, 246, 0.18), transparent 55%),
-    radial-gradient(700px 420px at 90% 0%, rgba(29, 78, 216, 0.12), transparent 50%),
-    linear-gradient(180deg, #05070b 0%, #070b12 45%, #05070b 100%);
-  background-attachment: fixed;
+  background: var(--bg);
 }
 
 a {
@@ -54,42 +51,26 @@ input {
 }
 
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(96, 165, 250, 0.28);
+  background: rgba(96, 165, 250, 0.25);
   border-radius: 999px;
-}
-
-@keyframes fadeUp {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 @keyframes pulseSoft {
   0%,
   100% {
-    opacity: 0.55;
+    opacity: 0.5;
   }
   50% {
     opacity: 1;
   }
 }
 
-.fade-up {
-  animation: fadeUp 650ms ease both;
-}
-
 .processing-dot {
-  animation: pulseSoft 1.4s ease-in-out infinite;
+  animation: pulseSoft 1.35s ease-in-out infinite;
 }
 
 .line-clamp-2 {

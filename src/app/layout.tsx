@@ -15,7 +15,7 @@ const fraunces = Fraunces({
 export const metadata: Metadata = {
   title: "Script Assembler",
   description:
-    "Documentary script divider — Google vs AI visual packs, cloud jobs, scene browser.",
+    "Visual intelligence studio — New Job, Jobs, Render Queue.",
 };
 
 export default function RootLayout({
