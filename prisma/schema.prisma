@@ -1,0 +1,41 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum JobStatus {
+  queued
+  running
+  completed
+  failed
+}
+
+model Job {
+  id             String    @id @default(cuid())
+  title          String?
+  status         JobStatus @default(queued)
+  phase          String    @default("google-first")
+  script         String
+  beatCount      Int       @default(0)
+  googleCount    Int       @default(0)
+  aiCount        Int       @default(0)
+  model          String?
+  error          String?
+  progress       String?
+  beatsJson      Json?
+  resultJson     Json?
+  previewsJson   Json?
+  usageJson      Json?
+  previewDone    Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  startedAt      DateTime?
+  completedAt    DateTime?
+
+  @@index([status, createdAt])
+  @@index([createdAt])
+}

@@ -2,40 +2,38 @@
 
 Documentary director for images-only Mystery YouTube films.
 
-**Phase 1 (now):** Google search logic — decide which visuals can come from real Google Image Search, write entity-first queries, bundle them to beats, and preview SearchAPI hits.
+**Phase 1:** Google search logic with cloud background jobs.
 
 ## Flow
 
 1. Paste full script **or** Whisper-aligned JSON
-2. ContactBoxTools runs the documentary-director prompt
-3. Get `googleSearches` packs (+ AI candidates listed, not generated yet)
-4. Preview what Google actually returns via SearchAPI
+2. Job is queued on Railway and runs in the background
+3. ContactBoxTools builds entity-first Google packs (+ AI candidates)
+4. SearchAPI previews each query and stores results in Postgres
+5. Open past jobs anytime from the sidebar
+
+Sized for ~**30–40 Google query previews / day** (soft limit, one job at a time).
 
 ## Stack
 
 - Next.js App Router
-- ContactBoxTools (`CONTACTBOX_*`)
-- SearchAPI.io Google Images (`SEARCHAPI_API_KEY`)
+- Postgres (Prisma)
+- ContactBoxTools
+- SearchAPI.io Google Images
 
 ## Local
 
 ```bash
 npm install
-cp .env.example .env.local
+cp .env.example .env
+npx prisma migrate dev
 npm run dev
 ```
 
-## Env
-
-| Variable | Purpose |
-|----------|---------|
-| `CONTACTBOX_API_KEY` | LLM token |
-| `CONTACTBOX_BASE_URL` | `https://api.contactboxtools.me/v1` |
-| `CONTACTBOX_MODEL` | e.g. `gpt-5.6-terra` |
-| `SEARCHAPI_API_KEY` | Google Images via SearchAPI.io |
-
 ## API
 
-- `POST /api/divide` — `{ script, phase?: "google-first" | "full" }`
-- `POST /api/search/preview` — `{ queries: string[] }`
+- `GET /api/jobs` — list past jobs + daily capacity
+- `POST /api/jobs` — queue a job (`{ script, title?, phase? }`)
+- `GET /api/jobs/:id` — job detail / progress / results
+- `POST /api/jobs/:id/retry` — re-queue a failed job
 - `GET /api/health`

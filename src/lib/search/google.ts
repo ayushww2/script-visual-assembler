@@ -17,6 +17,7 @@ export type GoogleSearchPreview = {
   provider: string;
   results: GoogleImageHit[];
   filteredOut: number;
+  error?: string;
 };
 
 type SearchApiImage = {
