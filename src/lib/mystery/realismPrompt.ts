@@ -120,16 +120,30 @@ export function fallbackMysteryImagePrompt(input: {
  * Keeps the locked documentary look; uses director visualIdea + narration.
  */
 const CHAIR_CLICHE =
-  /\b(vacant (interview )?chair|empty chair|interview chair|armchair|audio recorder|zoom recorder|printed notes|interview set|empty seat|director'?s empty chair)\b/i;
+  /\b(vacant (interview )?chair|empty chair|interview chair|armchair|audio recorder|zoom recorder|printed notes|interview set|empty seat|director'?s?\s*(empty\s*)?chair|director chair|folding chair)\b/i;
 
 /** Rewrite lazy empty-chair ideas into real environmental documentary stills. */
 export function sanitizeAiVisualIdea(visualIdea: string, words?: string): string {
   const idea = (visualIdea || "").trim();
-  if (!CHAIR_CLICHE.test(idea)) return idea;
   const cue = (words || "").trim().slice(0, 120);
+  const lower = `${idea} ${cue}`.toLowerCase();
+
+  // Production / creative-control beats → desk materials, never a director chair
+  if (
+    /\b(budget|financ|storyboard|creative control|production|languages, imagery)\b/.test(
+      lower,
+    )
+  ) {
+    return (
+      "documentary realism of marked film budget papers and hand-drawn storyboard sheets " +
+      "spread on a worktable under cool workroom light, no chairs, no people, no furniture hero"
+    );
+  }
+
+  if (!CHAIR_CLICHE.test(idea) && !CHAIR_CLICHE.test(cue)) return idea;
   return (
     "documentary realism of an overcast limestone hillside outside an ancient city, " +
-    "sparse vegetation and quiet empty middle distance, no furniture, no interior set" +
+    "sparse vegetation and quiet empty middle distance, no furniture, no interior set, no chairs" +
     (cue ? ` — mood for: ${cue}` : "")
   );
 }

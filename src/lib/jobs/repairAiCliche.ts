@@ -11,7 +11,7 @@ export type RepairProgress = (message: string) => Promise<void> | void;
 
 /** Empty-chair / vacant-interview prop stills — look cheap and off-topic. */
 const CHAIR_CLICHE =
-  /\b(vacant (interview )?chair|empty chair|interview chair|armchair|zoom recorder|audio recorder beside|interview set between takes|empty seat beside|recorder and (printed )?notes|vacant interview|director'?s empty chair)\b/i;
+  /\b(vacant (interview )?chair|empty chair|interview chair|armchair|zoom recorder|audio recorder beside|interview set between takes|empty seat beside|recorder and (printed )?notes|vacant interview|director'?s?\s*(empty\s*)?chair|director chair|folding chair)\b/i;
 
 /** Abstract “serious” beats → prefer the film’s person over empty props. */
 const SERIOUS_PERSON_BEAT =
@@ -23,7 +23,16 @@ export function isChairClicheAiScene(scene: SceneRecord): boolean {
   const blob = [scene.entityContext, scene.subject, scene.why, scene.query]
     .filter(Boolean)
     .join(" ");
-  return CHAIR_CLICHE.test(blob);
+  if (CHAIR_CLICHE.test(blob)) return true;
+  // Failed prior regen used a person name as the whole visual idea
+  const idea = (scene.entityContext || scene.subject || "").trim();
+  if (
+    /without empty-chair/i.test(scene.why || "") &&
+    /^(mel gibson|joe rogan|jim caviezel)$/i.test(idea)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -118,11 +127,20 @@ export async function repairChairClicheAiScenes(input: {
         failed += 1;
       }
     } else {
-      // Re-queue AI without the chair prop
-      const cleaned = sanitizeAiVisualIdea(
-        scene.entityContext || scene.subject || "documentary field still",
-        scene.words,
-      );
+      // Re-queue AI without the chair prop (never reuse a person-name as the visual idea)
+      const seed =
+        scene.entityContext &&
+        !/^mel gibson$/i.test(scene.entityContext.trim()) &&
+        !/^joe rogan$/i.test(scene.entityContext.trim())
+          ? scene.entityContext
+          : scene.words || scene.subject || "documentary field still";
+      const cleaned = sanitizeAiVisualIdea(seed, scene.words);
+      const subject =
+        scene.subject &&
+        !/^mel gibson$/i.test(scene.subject.trim()) &&
+        !SERIOUS_PERSON_BEAT.test(scene.subject)
+          ? scene.subject
+          : cleaned.split(/\s+/).slice(0, 4).join(" ");
       out[idx] = {
         ...scene,
         visualSource: "ai",
@@ -132,6 +150,7 @@ export async function repairChairClicheAiScenes(input: {
         sourceUrl: null,
         sourceDomain: null,
         imageCandidates: [],
+        subject,
         entityContext: cleaned,
         why: "Regenerating AI without empty-chair cliché",
       };
