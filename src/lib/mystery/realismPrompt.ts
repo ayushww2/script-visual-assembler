@@ -109,13 +109,38 @@ export function packToImagePrompt(pack: MysteryRealismPromptPack): string {
 export function fallbackMysteryImagePrompt(input: {
   visualIdea: string;
   subject?: string;
+  title?: string;
+  words?: string;
 }): string {
-  const idea = input.visualIdea || input.subject || "documentary field still";
+  return composeMysteryImagePrompt(input);
+}
+
+/**
+ * Fast local Mystery realism prompt (no ContactBox).
+ * Keeps the locked documentary look; uses director visualIdea + narration.
+ */
+export function composeMysteryImagePrompt(input: {
+  visualIdea: string;
+  subject?: string;
+  title?: string;
+  words?: string;
+}): string {
+  const idea = (input.visualIdea || input.subject || "documentary field still").trim();
+  const subject = (input.subject || "").trim();
+  const words = (input.words || "").trim().slice(0, 220);
+  const title = (input.title || "").trim();
+
   return [
-    `Documentary photograph, landscape 16:9, showing ${idea}.`,
-    "Real human-captured field / archive / lab evidence still, slightly imperfect: natural grain, soft optics, mild haze, uneven exposure.",
+    "Documentary photograph, landscape 16:9 evidence still.",
+    title ? `Episode context: ${title}.` : "",
+    `Primary subject: ${idea}.`,
+    subject && subject !== idea ? `Named subject: ${subject}.` : "",
+    words ? `Narration cue (do not render as text): ${words}` : "",
+    "Real human-captured field / archive / lab / shoreline still, slightly imperfect: natural grain, soft optics, mild haze, uneven exposure.",
     "Natural daylight or overcast documentary light. Realistic materials and scale. Functional framing, not poster composition.",
     MYSTERY_REALISM_LOCK,
     `Avoid: ${MYSTERY_DEFAULT_NEGATIVE}`,
-  ].join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 }

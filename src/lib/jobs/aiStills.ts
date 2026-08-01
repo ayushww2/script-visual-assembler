@@ -2,8 +2,8 @@ import type { SceneRecord } from "@/lib/jobs/scenes";
 import { uploadToR2 } from "@/lib/r2";
 import { generateGptImage } from "@/lib/images/openaiImage";
 import {
+  composeMysteryImagePrompt,
   engineerMysteryRealismPrompt,
-  fallbackMysteryImagePrompt,
   packToImagePrompt,
 } from "@/lib/mystery/realismPrompt";
 import { stillKey } from "@/lib/package/stills";
@@ -12,6 +12,7 @@ import {
   AI_STILL_CONCURRENCY,
 } from "@/lib/jobs/limits";
 import { mapPool } from "@/lib/jobs/pool";
+import { mapPartsParallel, PARALLEL_PARTS } from "@/lib/jobs/parallelParts";
 
 export type AiStillProgress = (message: string) => Promise<void> | void;
 
@@ -19,6 +20,8 @@ export type AiStillProgress = (message: string) => Promise<void> | void;
  * Generate Mystery realism stills for scenes missing imageUrl.
  * Default: local realism lock → gpt-image-2 → R2 (no per-still ContactBox).
  * Set AI_PROMPT_ENGINEER=1 to restore ContactBox prompt engineering (slower).
+ *
+ * Scenes are split into PARALLEL_PARTS (default 10) and all parts run at once.
  */
 export async function generateMissingAiStills(input: {
   jobId: string;
@@ -26,6 +29,9 @@ export async function generateMissingAiStills(input: {
   niche?: string | null;
   scenes: SceneRecord[];
   onProgress?: AiStillProgress;
+  /** Override total in-flight gens across all parts. */
+  concurrency?: number;
+  parts?: number;
 }): Promise<SceneRecord[]> {
   const needAi = input.scenes.filter((s) => !s.imageUrl?.trim());
   if (!needAi.length) return input.scenes;
@@ -33,6 +39,16 @@ export async function generateMissingAiStills(input: {
   const byId = new Map(input.scenes.map((s) => [s.id, { ...s }]));
   let done = 0;
   let lastProgressAt = 0;
+  const partDone = new Map<number, number>();
+  const partTotal = new Map<number, number>();
+
+  const totalConcurrency = Math.max(
+    1,
+    input.concurrency ?? AI_STILL_CONCURRENCY,
+  );
+  const parts = Math.max(1, input.parts ?? PARALLEL_PARTS);
+  // Spread concurrency across parts so 10×N doesn't explode rate limits.
+  const perPart = Math.max(1, Math.ceil(totalConcurrency / parts));
 
   async function runOne(scene: SceneRecord) {
     const visualIdea =
@@ -54,15 +70,19 @@ export async function generateMissingAiStills(input: {
         });
         imagePrompt = packToImagePrompt(pack);
       } catch {
-        imagePrompt = fallbackMysteryImagePrompt({
+        imagePrompt = composeMysteryImagePrompt({
           visualIdea,
           subject: scene.subject,
+          title: input.title || undefined,
+          words: scene.words,
         });
       }
     } else {
-      imagePrompt = fallbackMysteryImagePrompt({
+      imagePrompt = composeMysteryImagePrompt({
         visualIdea,
         subject: scene.subject,
+        title: input.title || undefined,
+        words: scene.words,
       });
     }
 
@@ -84,25 +104,34 @@ export async function generateMissingAiStills(input: {
       r2Url: uploaded.url,
       why: scene.why || "AI documentary realism still",
     });
-
-    done += 1;
-    const now = Date.now();
-    // Throttle DB progress writes — every still at the end, else ~every 2s
-    if (
-      done === needAi.length ||
-      now - lastProgressAt >= 2_000 ||
-      done === 1
-    ) {
-      lastProgressAt = now;
-      await input.onProgress?.(
-        `AI still ${done}/${needAi.length}: scene ${scene.sceneId}`,
-      );
-    }
   }
 
-  const concurrency = Math.max(1, AI_STILL_CONCURRENCY);
-  await mapPool(needAi, concurrency, async (scene) => {
-    await runOne(scene);
+  await mapPartsParallel(needAi, parts, async (shard, partIndex, partCount) => {
+    partTotal.set(partIndex, shard.length);
+    partDone.set(partIndex, 0);
+
+    await mapPool(shard, perPart, async (scene) => {
+      await runOne(scene);
+      done += 1;
+      partDone.set(partIndex, (partDone.get(partIndex) || 0) + 1);
+
+      const now = Date.now();
+      if (
+        done === needAi.length ||
+        done === 1 ||
+        now - lastProgressAt >= 2_000
+      ) {
+        lastProgressAt = now;
+        const partBits = Array.from({ length: partCount }, (_, i) => {
+          const d = partDone.get(i) || 0;
+          const t = partTotal.get(i) || 0;
+          return `${i + 1}:${d}/${t}`;
+        }).join(" ");
+        await input.onProgress?.(
+          `AI ×${partCount} parts (×${perPart} each) · ${done}/${needAi.length} · ${partBits}`,
+        );
+      }
+    });
   });
 
   return input.scenes.map((s) => byId.get(s.id) || s);

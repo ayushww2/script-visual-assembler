@@ -11,6 +11,11 @@ import { buildScenes } from "@/lib/jobs/scenes";
 import { generateMissingAiStills } from "@/lib/jobs/aiStills";
 import { balanceGoogleAiScenes, countSources } from "@/lib/jobs/balance";
 import {
+  mapPartsParallel,
+  PARALLEL_PARTS,
+} from "@/lib/jobs/parallelParts";
+import { mapPool } from "@/lib/jobs/pool";
+import {
   buildAndUploadRenderPackage,
   HandoverPackagerError,
 } from "@/lib/package/handover";
@@ -88,35 +93,55 @@ export async function processJob(jobId: string): Promise<void> {
         .slice()
         .sort((a, b) => b.priority - a.priority);
 
-      // Parallel Google — one best landscape/no-watermark still chosen later per scene
-      const concurrency = Math.max(1, GOOGLE_SEARCH_CONCURRENCY);
-      for (let i = 0; i < packs.length; i += concurrency) {
-        const slice = packs.slice(i, i + concurrency);
-        await prisma.job.update({
-          where: { id: jobId },
-          data: {
-            progress: `Google previews ${Math.min(i + slice.length, packs.length)}/${packs.length} (×${concurrency})…`,
-          },
+      // Split Google packs into PARALLEL_PARTS and run every part at once.
+      const googleParts = PARALLEL_PARTS;
+      const googlePerPart = Math.max(
+        1,
+        Math.ceil(GOOGLE_SEARCH_CONCURRENCY / googleParts),
+      );
+      let googleDone = 0;
+      let googleProgressAt = 0;
+
+      await prisma.job.update({
+        where: { id: jobId },
+        data: {
+          progress: `Google ×${googleParts} parts · ${packs.length} queries…`,
+        },
+      });
+
+      await mapPartsParallel(packs, googleParts, async (shard, partIndex, partCount) => {
+        await mapPool(shard, googlePerPart, async (pack) => {
+          try {
+            previews[pack.query] = await searchGoogleImages(
+              pack.query,
+              PREVIEW_IMAGES_PER_QUERY,
+            );
+          } catch (err) {
+            previews[pack.query] = {
+              query: pack.query,
+              provider: "searchapi_google_images",
+              results: [],
+              filteredOut: 0,
+              error: err instanceof Error ? err.message : "Search failed",
+            };
+          }
+          googleDone += 1;
+          const now = Date.now();
+          if (
+            googleDone === packs.length ||
+            googleDone === 1 ||
+            now - googleProgressAt >= 2_000
+          ) {
+            googleProgressAt = now;
+            await prisma.job.update({
+              where: { id: jobId },
+              data: {
+                progress: `Google ×${partCount} parts · ${googleDone}/${packs.length} (part ${partIndex + 1})…`,
+              },
+            });
+          }
         });
-        await Promise.all(
-          slice.map(async (pack) => {
-            try {
-              previews[pack.query] = await searchGoogleImages(
-                pack.query,
-                PREVIEW_IMAGES_PER_QUERY,
-              );
-            } catch (err) {
-              previews[pack.query] = {
-                query: pack.query,
-                provider: "searchapi_google_images",
-                results: [],
-                filteredOut: 0,
-                error: err instanceof Error ? err.message : "Search failed",
-              };
-            }
-          }),
-        );
-      }
+      });
 
       let scenes = buildScenes({
         beats: divided.beats,
@@ -139,7 +164,7 @@ export async function processJob(jobId: string): Promise<void> {
           googleCount: mix.google,
           aiCount: mix.ai,
           previewDone: true,
-          progress: `Scenes ${scenes.length} · Google ${mix.google} · AI ${mix.ai} — generating AI stills…`,
+          progress: `Scenes ${scenes.length} · Google ${mix.google} · AI ${mix.ai} — splitting into ${PARALLEL_PARTS} parallel parts…`,
         },
       });
 
@@ -151,12 +176,14 @@ export async function processJob(jobId: string): Promise<void> {
         });
       };
 
+      // AI stills: same scenes split into PARALLEL_PARTS, all parts run simultaneously.
       scenes = await generateMissingAiStills({
         jobId: job.id,
         title: job.title,
         niche: job.niche,
         scenes,
         onProgress,
+        parts: PARALLEL_PARTS,
       });
 
       await prisma.job.update({

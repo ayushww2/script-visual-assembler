@@ -7,7 +7,10 @@ export const MAX_CONCURRENT_JOBS = 1;
 /** Fetch candidates; keep ONE best landscape / no-watermark hit per scene. */
 export const PREVIEW_IMAGES_PER_QUERY = 8;
 /** Parallel Google searches — target whole Google phase under ~1–2 min. */
-export const GOOGLE_SEARCH_CONCURRENCY = 12;
+export const GOOGLE_SEARCH_CONCURRENCY = Math.max(
+  1,
+  Number(process.env.GOOGLE_SEARCH_CONCURRENCY || 20) || 20,
+);
 
 /**
  * gpt-image-2 in parallel — target full Yellowstone (~180 AI) under ~6–7 min AI phase.
