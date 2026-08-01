@@ -281,10 +281,10 @@ export default function Home() {
                   }
                   setError(null);
                 }}
-                className={`flex items-center justify-between rounded-lg px-3 py-2.5 text-left text-sm font-medium transition ${
+                className={`nav-item flex items-center justify-between rounded-xl px-3 py-3 text-left text-sm font-medium ${
                   active
-                    ? "bg-[rgba(59,130,246,0.18)] text-white"
-                    : "text-[var(--ink-soft)] hover:bg-white/5 hover:text-white"
+                    ? "bg-[rgba(59,130,246,0.2)] text-white shadow-[inset_0_0_0_1px_rgba(96,165,250,0.35)]"
+                    : "text-[var(--ink-soft)] hover:bg-white/[0.04] hover:text-white"
                 }`}
               >
                 <span>{item.label}</span>
@@ -345,7 +345,7 @@ export default function Home() {
                 type="button"
                 onClick={submitJob}
                 disabled={submitting || !script.trim()}
-                className="rounded-lg bg-[var(--blue)] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[var(--blue-deep)] disabled:opacity-45"
+                className="rounded-xl bg-[var(--blue)] px-6 py-3.5 text-sm font-semibold text-white shadow-[0_10px_28px_rgba(37,99,235,0.35)] transition hover:bg-[var(--blue-deep)] hover:shadow-[0_14px_34px_rgba(37,99,235,0.45)] disabled:opacity-45 disabled:shadow-none"
               >
                 {submitting ? "Submitting…" : "Submit job"}
               </button>
@@ -376,18 +376,21 @@ export default function Home() {
                 queueJobs.map((job) => (
                   <div
                     key={job.id}
-                    className="rounded-xl border border-[var(--line)] bg-[var(--panel)] px-5 py-4"
+                    className="fade-rise rounded-2xl border border-[rgba(96,165,250,0.28)] bg-[linear-gradient(180deg,rgba(59,130,246,0.12),rgba(16,21,34,0.96))] px-5 py-5 shadow-[0_12px_40px_rgba(0,0,0,0.28)]"
                   >
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
-                        <p className="font-medium text-white">
+                        <p className="text-base font-semibold text-white">
                           {job.title || "Untitled"}
                         </p>
-                        <p className="mt-1 text-sm text-[var(--ink-soft)]">
+                        <p className="mt-2 text-sm text-[var(--ink-soft)]">
                           {job.progress || "Waiting for cloud worker…"}
                         </p>
+                        <div className="mt-4 h-1.5 w-48 overflow-hidden rounded-full bg-white/10">
+                          <div className="processing-dot h-full w-2/3 rounded-full bg-[var(--blue)]" />
+                        </div>
                       </div>
-                      <span className="processing-dot text-xs font-semibold tracking-wide text-[var(--blue-bright)] uppercase">
+                      <span className="rounded-full border border-[rgba(96,165,250,0.35)] bg-[rgba(59,130,246,0.14)] px-3 py-1 text-[11px] font-semibold tracking-wide text-[var(--blue-bright)] uppercase">
                         Processing
                       </span>
                     </div>
@@ -421,7 +424,7 @@ export default function Home() {
                       return (
                         <div
                           key={day.key}
-                          className="rounded-xl border border-[var(--line)] bg-[var(--panel)]"
+                          className="fade-rise overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--panel)] shadow-[0_10px_30px_rgba(0,0,0,0.22)]"
                         >
                           <button
                             type="button"
@@ -431,42 +434,53 @@ export default function Home() {
                                 [day.key]: !open,
                               }))
                             }
-                            className="flex w-full items-center justify-between px-5 py-4 text-left"
+                            className="click-row flex w-full items-center justify-between border-b border-transparent px-5 py-4 text-left"
                           >
-                            <span className="font-[family-name:var(--font-fraunces)] text-xl text-white">
-                              {day.label}
-                            </span>
-                            <span className="rounded-full border border-[var(--line)] px-2.5 py-0.5 text-xs font-semibold text-[var(--blue-bright)]">
-                              {day.count}
+                            <div className="flex items-center gap-3">
+                              <span
+                                className={`text-[var(--ink-soft)] transition-transform ${open ? "rotate-90" : ""}`}
+                                aria-hidden
+                              >
+                                ▸
+                              </span>
+                              <span className="font-[family-name:var(--font-fraunces)] text-xl text-white">
+                                {day.label}
+                              </span>
+                            </div>
+                            <span className="rounded-full border border-[rgba(96,165,250,0.35)] bg-[rgba(59,130,246,0.12)] px-2.5 py-0.5 text-xs font-semibold text-[var(--blue-bright)]">
+                              {day.count} {day.count === 1 ? "job" : "jobs"}
                             </span>
                           </button>
                           {open ? (
-                            <div className="border-t border-[var(--line)] px-2 py-2">
+                            <div className="space-y-2 px-3 py-3">
                               {day.jobs.map((job) => (
                                 <button
                                   key={job.id}
                                   type="button"
                                   onClick={() => openJob(job.id)}
-                                  className="flex w-full items-start justify-between gap-3 rounded-lg px-3 py-3 text-left hover:bg-white/5"
+                                  className="click-row flex w-full items-center gap-4 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-4 py-4 text-left"
                                 >
-                                  <div>
-                                    <p className="font-medium text-white">
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-base font-semibold text-white">
                                       {job.title || "Untitled"}
                                     </p>
                                     <p className="mt-1 text-xs text-[var(--ink-soft)]">
                                       {job.status === "failed"
                                         ? job.error || "Failed"
-                                        : `${job.sceneCount || 0} scenes · ${job.googleCount} Google`}
+                                        : `${job.sceneCount || 0} scenes · ${job.googleCount} Google packs`}
                                     </p>
                                   </div>
                                   <span
-                                    className={`text-xs font-semibold uppercase ${
+                                    className={`rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide uppercase ${
                                       job.status === "failed"
-                                        ? "text-[var(--danger)]"
-                                        : "text-[var(--ink-soft)]"
+                                        ? "bg-[rgba(248,113,113,0.12)] text-[var(--danger)]"
+                                        : "bg-[rgba(52,211,153,0.12)] text-[var(--ok)]"
                                     }`}
                                   >
                                     {statusLabel(job.status)}
+                                  </span>
+                                  <span className="chevron shrink-0 text-sm font-semibold text-[var(--ink-soft)]">
+                                    Open →
                                   </span>
                                 </button>
                               ))}
@@ -545,7 +559,7 @@ function JobDetailView({
       <button
         type="button"
         onClick={onBack}
-        className="text-sm font-semibold text-[var(--blue-bright)] hover:text-white"
+        className="rounded-lg border border-transparent px-2 py-1 text-sm font-semibold text-[var(--blue-bright)] transition hover:border-[rgba(96,165,250,0.35)] hover:bg-[rgba(59,130,246,0.1)] hover:text-white"
       >
         ← All jobs
       </button>
@@ -686,23 +700,26 @@ function JobDetailView({
                   key={scene.id}
                   type="button"
                   onClick={() => onSelectScene(scene.id)}
-                  className="rounded-xl border border-[var(--line)] bg-[var(--panel)] p-4 text-left transition hover:border-[var(--blue)]"
+                  className="scene-card rounded-2xl border border-[var(--line)] bg-[var(--panel)] p-4 text-left"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-semibold tracking-wide text-[var(--blue-bright)] uppercase">
                       Scene {scene.index}
                     </span>
-                    <span className="text-[11px] uppercase text-[var(--ink-soft)]">
+                    <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] uppercase text-[var(--ink-soft)]">
                       {scene.visualSource}
                     </span>
                   </div>
-                  <p className="mt-3 line-clamp-2 text-sm font-medium text-white">
+                  <p className="mt-3 line-clamp-2 text-sm font-semibold text-white">
                     {scene.query ||
                       scene.subject ||
                       scene.scriptText.slice(0, 80)}
                   </p>
                   <p className="mt-2 line-clamp-2 text-xs text-[var(--ink-soft)]">
                     {scene.scriptText}
+                  </p>
+                  <p className="chevron mt-4 text-xs font-semibold text-[var(--ink-soft)]">
+                    Open scene →
                   </p>
                 </button>
               ))}
