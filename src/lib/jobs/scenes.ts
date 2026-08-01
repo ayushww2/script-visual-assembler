@@ -37,6 +37,8 @@ export type SceneRecord = {
   why?: string;
   priority?: number;
   thumbnailUrl?: string | null;
+  /** Alternate Google hits / thumbs for rehost fallback when original 403s. */
+  imageCandidates?: string[];
   sourceUrl?: string | null;
   sourceDomain?: string | null;
   r2Url?: string | null;
@@ -123,6 +125,10 @@ export function buildScenes(input: {
     };
 
     if (google) {
+      const hits = preview?.results || [];
+      const imageCandidates = uniqueCandidateUrls(
+        hits.flatMap((h) => [h.imageUrl, h.thumbnailUrl]),
+      );
       return {
         ...base,
         visualSource: "google" as const,
@@ -131,8 +137,9 @@ export function buildScenes(input: {
         entityContext: google.entityContext,
         why: google.whyGoogle,
         priority: google.priority,
-        imageUrl: hit?.imageUrl ?? null,
+        imageUrl: hit?.imageUrl ?? hits[0]?.thumbnailUrl ?? null,
         thumbnailUrl: hit?.thumbnailUrl ?? hit?.imageUrl ?? null,
+        imageCandidates,
         sourceUrl: hit?.sourcePageUrl ?? null,
         sourceDomain: hit?.sourceDomain ?? null,
         r2Url: null,
@@ -196,4 +203,18 @@ export function toJobExportPayload(input: {
 
 function roundSec(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+function uniqueCandidateUrls(
+  urls: Array<string | null | undefined>,
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const u of urls) {
+    const v = (u || "").trim();
+    if (!v.startsWith("http") || seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
 }

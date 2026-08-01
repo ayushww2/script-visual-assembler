@@ -80,6 +80,11 @@ export async function buildAndUploadRenderPackage(
       sceneId: scene.sceneId,
       index: scene.index,
       sourceUrl: scene.imageUrl!,
+      fallbackUrls: [
+        scene.thumbnailUrl || "",
+        ...(scene.imageCandidates || []),
+      ].filter(Boolean),
+      referer: scene.sourceUrl,
     });
     r2BySceneId.set(scene.sceneId, uploaded.url);
     updatedScenes.push({

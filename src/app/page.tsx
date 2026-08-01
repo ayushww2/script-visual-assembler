@@ -653,6 +653,11 @@ export default function Home() {
                                       {job.status === "failed"
                                         ? job.error || "Failed"
                                         : `${job.sceneCount || 0} scenes · ${job.googleCount} Google packs`}
+                                      {job.packageReady
+                                        ? " · package ready"
+                                        : job.packageError
+                                          ? " · package pending"
+                                          : ""}
                                     </p>
                                   </div>
                                   <span
