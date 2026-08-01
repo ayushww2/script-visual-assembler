@@ -55,8 +55,6 @@ export async function GET(req: Request, { params }: Params) {
         jobId: job.id,
         sceneCount: job.sceneCount,
         voiceoverDurationSec: job.voiceoverDurationSec,
-        imagesOnly: job.imagesOnly,
-        wpm: 160,
       });
     }
 

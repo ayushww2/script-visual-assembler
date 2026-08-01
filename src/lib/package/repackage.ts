@@ -59,8 +59,8 @@ export async function repackageJob(jobId: string): Promise<void> {
         packageJson: handover.packageJson as unknown as Prisma.InputJsonValue,
         packageError: null,
         imagesOnly: handover.imagesOnly,
-        voiceoverDurationSec: handover.packageJson.voiceoverDurationSec ?? null,
-        progress: `Package ready · scenes=${handover.packageJson.sceneCount} · vo=${handover.packageJson.voiceoverDurationSec.toFixed(1)}s · wpm=${handover.packageJson.wpm}`,
+        voiceoverDurationSec: handover.voiceoverDurationSec,
+        progress: `Package ready · scenes=${handover.packageJson.scenes.length} · vo=${handover.voiceoverDurationSec.toFixed(1)}s · wpm=${niche.wpm}`,
       },
     });
   } catch (packErr) {

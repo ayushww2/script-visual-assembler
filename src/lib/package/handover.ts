@@ -2,9 +2,7 @@ import type { SceneRecord } from "@/lib/jobs/scenes";
 import { uploadToR2 } from "@/lib/r2";
 import {
   DEFAULT_PACKAGE_WPM,
-  PACKAGE_VERSION,
   type RenderPackage,
-  type SceneSource,
 } from "./schema";
 import { timeChunksAtWpm } from "./timing";
 import {
@@ -31,6 +29,7 @@ export type HandoverResult = {
   packageJson: RenderPackage;
   scenes: SceneRecord[];
   imagesOnly: boolean;
+  voiceoverDurationSec: number;
 };
 
 export class HandoverPackagerError extends Error {
@@ -52,7 +51,7 @@ export async function buildAndUploadRenderPackage(
   const scenes = [...input.scenes].sort((a, b) => a.index - b.index);
 
   if (!scenes.length) {
-    throw new HandoverPackagerError("sceneCount == 0", ["No scenes to package"]);
+    throw new HandoverPackagerError("scenes is empty", ["No scenes to package"]);
   }
 
   const missing = scenes.filter((s) => !s.imageUrl?.trim());
@@ -104,20 +103,14 @@ export async function buildAndUploadRenderPackage(
   const packageScenes = updatedScenes.map((scene, i) => {
     const t = timed[i];
     return {
-      sceneId: scene.sceneId,
-      index: scene.index,
+      words: t.words,
+      imageUrl: r2BySceneId.get(scene.sceneId)!,
       startSec: t.startSec,
       endSec: t.endSec,
       durationSec: t.durationSec,
-      words: t.words,
-      wordCount: t.wordCount,
-      imageUrl: r2BySceneId.get(scene.sceneId)!,
-      source: toPackageSource(scene.visualSource),
-      subject: scene.subject || scene.query || undefined,
     };
   });
 
-  // Keep SceneRecord timing in sync with package
   for (let i = 0; i < updatedScenes.length; i++) {
     const t = timed[i];
     updatedScenes[i] = {
@@ -130,22 +123,11 @@ export async function buildAndUploadRenderPackage(
     };
   }
 
-  const computedTotal = packageScenes.length
+  const voiceoverDurationSec = packageScenes.length
     ? packageScenes[packageScenes.length - 1].endSec
     : 0;
 
   const pkg: RenderPackage = {
-    version: PACKAGE_VERSION,
-    jobId: input.jobId,
-    title: input.title?.trim() || "Untitled",
-    createdAt: new Date(input.createdAt || Date.now()).toISOString(),
-    wpm,
-    mode: imagesOnly ? "images-only" : "full",
-    voiceoverUrl: imagesOnly ? "" : input.voiceoverUrl || "",
-    voiceoverDurationSec: imagesOnly
-      ? computedTotal
-      : input.voiceoverDurationSec || computedTotal,
-    sceneCount: packageScenes.length,
     scenes: packageScenes,
   };
 
@@ -174,13 +156,6 @@ export async function buildAndUploadRenderPackage(
     packageJson: pkg,
     scenes: updatedScenes,
     imagesOnly,
+    voiceoverDurationSec,
   };
-}
-
-function toPackageSource(
-  visualSource: SceneRecord["visualSource"],
-): SceneSource {
-  if (visualSource === "google") return "google";
-  if (visualSource === "ai") return "ai";
-  return "other";
 }

@@ -27,98 +27,70 @@ export async function validateRenderPackage(
     return issues;
   }
 
-  if (pkg.sceneCount !== pkg.scenes.length) {
-    issues.push({
-      code: "sceneCount",
-      message: `sceneCount ${pkg.sceneCount} != scenes.length ${pkg.scenes.length}`,
-    });
+  if (!pkg.scenes.length) {
+    issues.push({ code: "empty", message: "scenes is empty" });
+    return issues;
   }
 
-  if (pkg.sceneCount === 0 || pkg.scenes.length === 0) {
-    issues.push({ code: "empty", message: "sceneCount == 0" });
-  }
-
-  if (pkg.mode === "full") {
-    if (!pkg.voiceoverUrl.startsWith("https://")) {
-      issues.push({
-        code: "voiceover",
-        message: "voiceoverUrl missing or not HTTPS (full mode)",
-      });
-    }
-  }
-
-  const sorted = [...pkg.scenes].sort((a, b) => a.index - b.index);
-  for (let i = 0; i < sorted.length; i++) {
-    if (sorted[i] !== pkg.scenes[i]) {
-      issues.push({
-        code: "order",
-        message: "scenes must be sorted by index ascending",
-      });
-      break;
-    }
-  }
-
-  if (sorted[0] && Math.abs(sorted[0].startSec) > GAP_TOLERANCE) {
+  if (Math.abs(pkg.scenes[0].startSec) > GAP_TOLERANCE) {
     issues.push({
       code: "start",
-      message: `first startSec must be 0 (got ${sorted[0].startSec})`,
+      message: `first startSec must be 0 (got ${pkg.scenes[0].startSec})`,
     });
   }
 
-  for (let i = 0; i < sorted.length; i++) {
-    const s = sorted[i];
+  for (let i = 0; i < pkg.scenes.length; i++) {
+    const s = pkg.scenes[i];
+    const label = `scene ${i + 1}`;
     if (!s.words.trim()) {
-      issues.push({
-        code: "words",
-        message: `scene ${s.sceneId}: empty words`,
-      });
+      issues.push({ code: "words", message: `${label}: empty words` });
     }
     if (!s.imageUrl?.startsWith("https://")) {
       issues.push({
         code: "imageUrl",
-        message: `scene ${s.sceneId}: imageUrl must be public HTTPS`,
+        message: `${label}: imageUrl must be public HTTPS`,
       });
     }
     if (s.imageUrl.includes("localhost") || s.imageUrl.includes("127.0.0.1")) {
       issues.push({
         code: "imageUrl",
-        message: `scene ${s.sceneId}: imageUrl must not be localhost`,
+        message: `${label}: imageUrl must not be localhost`,
       });
     }
     if (s.endSec <= s.startSec) {
       issues.push({
         code: "timing",
-        message: `scene ${s.sceneId}: endSec must be > startSec`,
+        message: `${label}: endSec must be > startSec`,
       });
     }
     const expectedDur = round3(s.endSec - s.startSec);
     if (Math.abs(expectedDur - s.durationSec) > GAP_TOLERANCE) {
       issues.push({
         code: "timing",
-        message: `scene ${s.sceneId}: durationSec mismatch`,
+        message: `${label}: durationSec mismatch`,
       });
     }
     if (i > 0) {
-      const prev = sorted[i - 1];
+      const prev = pkg.scenes[i - 1];
       const gap = Math.abs(s.startSec - prev.endSec);
       if (gap > GAP_TOLERANCE) {
         issues.push({
           code: "continuity",
-          message: `gap/overlap between scene ${prev.sceneId} and ${s.sceneId} (${gap.toFixed(3)}s)`,
+          message: `gap/overlap between scene ${i} and ${i + 1} (${gap.toFixed(3)}s)`,
         });
       }
     }
   }
 
   if (opts?.checkImageReachability !== false) {
-    const sample = sorted.slice(0, Math.min(sorted.length, 40));
+    const sample = pkg.scenes.slice(0, Math.min(pkg.scenes.length, 40));
     await Promise.all(
-      sample.map(async (s) => {
+      sample.map(async (s, i) => {
         const ok = await isPubliclyReachable(s.imageUrl);
         if (!ok) {
           issues.push({
             code: "unreachable",
-            message: `scene ${s.sceneId}: imageUrl not publicly reachable`,
+            message: `scene ${i + 1}: imageUrl not publicly reachable`,
           });
         }
       }),
@@ -133,13 +105,16 @@ async function isPubliclyReachable(url: string): Promise<boolean> {
     const head = await fetch(url, {
       method: "HEAD",
       redirect: "follow",
+      headers: { "User-Agent": "ScriptAssemblerPackager/1.0" },
       signal: AbortSignal.timeout(12_000),
     });
     if (head.ok) return true;
-    // Some CDNs reject HEAD — try a tiny GET
     const get = await fetch(url, {
       method: "GET",
-      headers: { Range: "bytes=0-0" },
+      headers: {
+        Range: "bytes=0-0",
+        "User-Agent": "ScriptAssemblerPackager/1.0",
+      },
       redirect: "follow",
       signal: AbortSignal.timeout(12_000),
     });
