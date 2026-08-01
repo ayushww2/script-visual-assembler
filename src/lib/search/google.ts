@@ -87,6 +87,14 @@ const BLOCKED_MEDIA_DOMAINS = [
   "scdn.co",
   "i.scdn.co",
   "mosaic.scdn",
+  // Digital art / CGI sculpt portfolios — not documentary photos
+  "zbrushcentral.com",
+  "artstation.com",
+  "deviantart.com",
+  "behance.net",
+  "cgtrader.com",
+  "sketchfab.com",
+  "renderosity.com",
 ];
 
 const WATERMARK_URL_HINTS = [
@@ -159,6 +167,12 @@ const TEXT_WATERMARK_HINTS = [
   "ai-generated",
   "midjourney",
   "generate ai",
+  "zbrush",
+  "3d render",
+  "3d sculpt",
+  "digital art",
+  "cgi portrait",
+  "fan art",
 ];
 
 const GROUP_SHOT_HINTS = [
@@ -287,6 +301,15 @@ export function isBadGoogleScenePick(scene: {
 
   if (meta.includes("creativemarket") || url.includes("creativemarket")) return true;
   if (meta.includes("watermark") || url.includes("watermark")) return true;
+  if (
+    domain.includes("zbrushcentral") ||
+    domain.includes("artstation") ||
+    domain.includes("deviantart") ||
+    meta.includes("zbrush") ||
+    meta.includes("3d sculpt")
+  ) {
+    return true;
+  }
 
   // Bare "Gibson" query (not Mel Gibson) → wrong people
   if (/\bgibson\b/.test(meta) && !/\bmel gibson\b/.test(meta)) return true;

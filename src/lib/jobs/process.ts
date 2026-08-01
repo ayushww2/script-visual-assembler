@@ -18,6 +18,7 @@ import {
 } from "@/lib/jobs/repairGoogleFirst";
 import {
   isChairClicheAiScene,
+  isWrongChairPersonSwap,
   repairChairClicheAiScenes,
 } from "@/lib/jobs/repairAiCliche";
 import {
@@ -83,7 +84,9 @@ export async function processJob(jobId: string): Promise<void> {
         let scenes = job.scenesJson as unknown as SceneRecord[];
         const dirtyGoogle = scenes.filter((s) => isBadGoogleScenePick(s)).length;
         const misplacedAi = scenes.filter((s) => isMisplacedAiScene(s)).length;
-        const chairCliche = scenes.filter((s) => isChairClicheAiScene(s)).length;
+        const chairCliche = scenes.filter(
+          (s) => isChairClicheAiScene(s) || isWrongChairPersonSwap(s),
+        ).length;
         const missing = scenes.filter((s) => !s.imageUrl?.trim()).length;
 
         await prisma.job.update({

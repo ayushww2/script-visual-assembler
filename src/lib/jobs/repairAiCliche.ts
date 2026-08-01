@@ -1,4 +1,5 @@
 import type { SceneRecord } from "@/lib/jobs/scenes";
+import { sanitizeAiVisualIdea } from "@/lib/mystery/realismPrompt";
 import {
   pickBestGoogleHit,
   searchGoogleImages,
@@ -10,7 +11,11 @@ export type RepairProgress = (message: string) => Promise<void> | void;
 
 /** Empty-chair / vacant-interview prop stills — look cheap and off-topic. */
 const CHAIR_CLICHE =
-  /\b(vacant (interview )?chair|empty chair|interview chair|armchair|audio recorder|zoom recorder|printed notes|interview set between takes|empty seat beside|recorder and (printed )?notes)\b/i;
+  /\b(vacant (interview )?chair|empty chair|interview chair|armchair|zoom recorder|audio recorder beside|interview set between takes|empty seat beside|recorder and (printed )?notes|vacant interview|director'?s empty chair)\b/i;
+
+/** Abstract “serious” beats → prefer the film’s person over empty props. */
+const SERIOUS_PERSON_BEAT =
+  /\b(serious|raising eyebrows|so serious|investigative pause)\b/i;
 
 export function isChairClicheAiScene(scene: SceneRecord): boolean {
   if (scene.visualSource !== "ai") return false;
@@ -22,8 +27,21 @@ export function isChairClicheAiScene(scene: SceneRecord): boolean {
 }
 
 /**
- * Replace empty-chair AI stills with a real Google photo of the film’s person
- * (or a serious documentary stand-in query). Other scenes untouched.
+ * Wrong prior repair: empty-chair → Mel Google on non-serious beats (e.g. budget/storyboard).
+ * Send those back to AI (chair-free prompt).
+ */
+export function isWrongChairPersonSwap(scene: SceneRecord): boolean {
+  if (scene.visualSource !== "google") return false;
+  const why = (scene.why || "").toLowerCase();
+  if (!why.includes("empty-chair")) return false;
+  const blob = `${scene.subject || ""} ${scene.words || ""}`;
+  return !SERIOUS_PERSON_BEAT.test(blob);
+}
+
+/**
+ * Replace empty-chair AI stills:
+ * - “serious / pause” beats → clean Google of the film’s primary person
+ * - other chair clichés → re-queue AI with a chair-free environmental idea
  */
 export async function repairChairClicheAiScenes(input: {
   scenes: SceneRecord[];
@@ -33,7 +51,7 @@ export async function repairChairClicheAiScenes(input: {
 }): Promise<{ scenes: SceneRecord[]; repaired: number; failed: number }> {
   const indexes: number[] = [];
   input.scenes.forEach((s, i) => {
-    if (isChairClicheAiScene(s)) indexes.push(i);
+    if (isChairClicheAiScene(s) || isWrongChairPersonSwap(s)) indexes.push(i);
   });
   if (!indexes.length) {
     return { scenes: input.scenes, repaired: 0, failed: 0 };
@@ -41,7 +59,9 @@ export async function repairChairClicheAiScenes(input: {
 
   const out = input.scenes.map((s) => ({ ...s }));
   const used = new Set(
-    out.filter((s) => s.imageUrl?.trim()).map((s) => s.imageUrl!),
+    out
+      .filter((s, i) => s.imageUrl?.trim() && !indexes.includes(i))
+      .map((s) => s.imageUrl!),
   );
   let repaired = 0;
   let failed = 0;
@@ -49,54 +69,73 @@ export async function repairChairClicheAiScenes(input: {
   const concurrency = Math.max(1, input.concurrency ?? 4);
 
   await input.onProgress?.(
-    `Replacing ${indexes.length} empty-chair AI cliché stills…`,
+    `Fixing ${indexes.length} empty-chair cliché stills…`,
   );
 
   await mapPool(indexes, concurrency, async (idx) => {
     const scene = out[idx];
+    const blob = `${scene.subject || ""} ${scene.words || ""}`;
+    const preferPerson = SERIOUS_PERSON_BEAT.test(blob);
     const personName = primaryPersonFromText(
       input.title,
       scene.words,
       scene.scriptText,
       scene.subject,
     );
-    const query = personName
-      ? `${personName} interview`
-      : "documentary interview serious close up";
 
-    try {
-      const preview = await searchGoogleImages(query, 16, { personName });
-      const hit = pickBestGoogleHit(preview, {
-        usedUrls: used,
-        personName,
-      });
-      if (!hit?.imageUrl) {
+    if (preferPerson && personName) {
+      const query = `${personName} portrait photo`;
+      try {
+        const preview = await searchGoogleImages(query, 20, { personName });
+        const hit = pickBestGoogleHit(preview, {
+          usedUrls: used,
+          personName,
+        });
+        if (!hit?.imageUrl) {
+          failed += 1;
+        } else {
+          used.add(hit.imageUrl);
+          out[idx] = {
+            ...scene,
+            visualSource: "google",
+            query,
+            subject: personName,
+            imageUrl: hit.imageUrl,
+            thumbnailUrl: hit.thumbnailUrl || hit.imageUrl,
+            sourceUrl: hit.sourcePageUrl || null,
+            sourceDomain: hit.sourceDomain || null,
+            imageCandidates: preview.results
+              .map((r) => r.imageUrl)
+              .filter(Boolean)
+              .slice(0, 8),
+            why: `Replaced empty-chair AI · Google single-person: ${personName}`,
+            r2Url: null,
+            entityContext: undefined,
+          };
+          repaired += 1;
+        }
+      } catch {
         failed += 1;
-      } else {
-        used.add(hit.imageUrl);
-        out[idx] = {
-          ...scene,
-          visualSource: "google",
-          query,
-          subject: personName || scene.subject,
-          imageUrl: hit.imageUrl,
-          thumbnailUrl: hit.thumbnailUrl || hit.imageUrl,
-          sourceUrl: hit.sourcePageUrl || null,
-          sourceDomain: hit.sourceDomain || null,
-          imageCandidates: preview.results
-            .map((r) => r.imageUrl)
-            .filter(Boolean)
-            .slice(0, 8),
-          why: personName
-            ? `Replaced empty-chair AI · Google single-person: ${personName}`
-            : "Replaced empty-chair AI cliché with real documentary photo",
-          r2Url: null,
-          entityContext: undefined,
-        };
-        repaired += 1;
       }
-    } catch {
-      failed += 1;
+    } else {
+      // Re-queue AI without the chair prop
+      const cleaned = sanitizeAiVisualIdea(
+        scene.entityContext || scene.subject || "documentary field still",
+        scene.words,
+      );
+      out[idx] = {
+        ...scene,
+        visualSource: "ai",
+        imageUrl: null,
+        thumbnailUrl: null,
+        r2Url: null,
+        sourceUrl: null,
+        sourceDomain: null,
+        imageCandidates: [],
+        entityContext: cleaned,
+        why: "Regenerating AI without empty-chair cliché",
+      };
+      repaired += 1;
     }
 
     done += 1;

@@ -124,6 +124,7 @@ export function personSearchNegatives(personName: string | null | undefined): st
     return (
       "-\"david gibson\" -\"dean gibson\" -\"hutton gibson\" " +
       "-\"andrew garfield\" -garfield -\"hacksaw ridge\" " +
+      "-zbrush -artstation -\"digital art\" -\"3d\" -cgi -render " +
       "-collage -split -\"side by side\" -thumbnail -logo -people.com"
     );
   }

@@ -120,7 +120,7 @@ export function fallbackMysteryImagePrompt(input: {
  * Keeps the locked documentary look; uses director visualIdea + narration.
  */
 const CHAIR_CLICHE =
-  /\b(vacant (interview )?chair|empty chair|interview chair|armchair|audio recorder|zoom recorder|printed notes|interview set|empty seat)\b/i;
+  /\b(vacant (interview )?chair|empty chair|interview chair|armchair|audio recorder|zoom recorder|printed notes|interview set|empty seat|director'?s empty chair)\b/i;
 
 /** Rewrite lazy empty-chair ideas into real environmental documentary stills. */
 export function sanitizeAiVisualIdea(visualIdea: string, words?: string): string {
