@@ -1,20 +1,14 @@
 import OpenAI from "openai";
+import {
+  getContactBoxApiKey,
+  getContactBoxBaseUrl,
+  getContactBoxModel,
+} from "@/lib/env";
 
 export function getContactBoxConfig() {
-  const apiKey =
-    process.env.CONTACTBOX_API_KEY ||
-    process.env.OPENAI_API_KEY ||
-    "";
-  const baseURL = (
-    process.env.CONTACTBOX_BASE_URL ||
-    process.env.OPENAI_BASE_URL ||
-    "https://api.contactboxtools.me/v1"
-  ).replace(/\/$/, "");
-  const model =
-    process.env.CONTACTBOX_MODEL ||
-    process.env.OPENAI_MODEL ||
-    "gpt-5.6-terra";
-
+  const apiKey = getContactBoxApiKey();
+  const baseURL = getContactBoxBaseUrl();
+  const model = getContactBoxModel();
   return { apiKey, baseURL, model, configured: Boolean(apiKey) };
 }
 

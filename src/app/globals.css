@@ -1,14 +1,14 @@
 @import "tailwindcss";
 
 :root {
-  --bg-0: #e8ebe6;
-  --bg-1: #f3f5f1;
+  --bg-0: #e7ebe8;
+  --bg-1: #f2f4f1;
   --ink: #14201a;
   --ink-soft: #3d4a43;
   --accent: #0f6b5c;
   --accent-deep: #0a4f44;
   --line: rgba(20, 32, 26, 0.12);
-  --glow: rgba(15, 107, 92, 0.18);
+  --warn: #8a5a1b;
 }
 
 @theme inline {
@@ -32,9 +32,9 @@ body {
   color: var(--ink);
   font-family: var(--font-figtree), sans-serif;
   background:
-    radial-gradient(1200px 700px at 12% -10%, rgba(15, 107, 92, 0.16), transparent 55%),
-    radial-gradient(900px 600px at 90% 10%, rgba(20, 32, 26, 0.08), transparent 50%),
-    linear-gradient(160deg, var(--bg-0), var(--bg-1) 45%, #dfe5df);
+    radial-gradient(1100px 640px at 8% -8%, rgba(15, 107, 92, 0.14), transparent 55%),
+    radial-gradient(800px 520px at 96% 0%, rgba(20, 32, 26, 0.07), transparent 50%),
+    linear-gradient(165deg, var(--bg-0), var(--bg-1) 50%, #dde3dd);
   background-attachment: fixed;
 }
 
@@ -43,8 +43,8 @@ body::before {
   pointer-events: none;
   position: fixed;
   inset: 0;
-  opacity: 0.035;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   z-index: 0;
 }
 
@@ -53,13 +53,22 @@ a {
   text-decoration: none;
 }
 
+button,
+textarea {
+  font: inherit;
+}
+
 @keyframes fadeUp {
   from {
     opacity: 0;
-    transform: translateY(14px);
+    transform: translateY(12px);
   }
   to {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+.fade-up {
+  animation: fadeUp 700ms ease both;
 }

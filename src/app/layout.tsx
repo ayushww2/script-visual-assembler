@@ -13,9 +13,9 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: "Script Visual Assembler",
+  title: "Script Divider",
   description:
-    "Assemble documentary visuals from script — ContactBoxTools powered.",
+    "Documentary director for Mystery YouTube stills — Google vs AI visual split.",
 };
 
 export default function RootLayout({
