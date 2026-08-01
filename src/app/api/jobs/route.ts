@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { after } from "next/server";
 import { prisma } from "@/lib/db";
 import { deriveJobTitle } from "@/lib/jobs/title";
-import { processJob } from "@/lib/jobs/process";
+import { processJob, resumePendingJobs } from "@/lib/jobs/process";
 import { toJobListItem } from "@/lib/jobs/serialize";
 import {
   countTodaysPreviewQueries,

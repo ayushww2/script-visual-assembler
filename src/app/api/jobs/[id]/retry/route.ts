@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { after } from "next/server";
 import { prisma } from "@/lib/db";
 import { processJob } from "@/lib/jobs/process";
 import { toJobListItem } from "@/lib/jobs/serialize";
@@ -24,13 +23,17 @@ export async function POST(_req: Request, { params }: Params) {
         error: null,
         progress: "Re-queued…",
         previewDone: false,
+        packageReady: false,
+        packageUrl: null,
+        packageError: null,
         completedAt: null,
         startedAt: null,
       },
     });
 
-    after(async () => {
-      await processJob(job.id);
+    // Fire-and-forget in this Node process (Railway). Don't rely on after().
+    void processJob(job.id).catch((err) => {
+      console.error("[jobs] processJob failed", job.id, err);
     });
 
     return NextResponse.json({ job: toJobListItem(job) }, { status: 202 });
