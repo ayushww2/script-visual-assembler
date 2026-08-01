@@ -57,6 +57,28 @@ const WATERMARK_DOMAINS = [
   "superstock.com",
 ];
 
+/** Thumbs/social posts almost always have logos, text, or watermarks baked in. */
+const BLOCKED_MEDIA_DOMAINS = [
+  "youtube.com",
+  "youtu.be",
+  "ytimg.com",
+  "ggpht.com",
+  "instagram.com",
+  "cdninstagram.com",
+  "facebook.com",
+  "fbcdn.net",
+  "tiktok.com",
+  "pinterest.com",
+  "pinimg.com",
+  "twitter.com",
+  "x.com",
+  "twimg.com",
+  "reddit.com",
+  "redd.it",
+  "imgur.com",
+  "tumblr.com",
+];
+
 /** Title/source hints that usually mean logos, text, captions, watermarks. */
 const TEXT_WATERMARK_HINTS = [
   "shutterstock",
@@ -157,13 +179,35 @@ function isLandscape(hit: GoogleImageHit): boolean {
   return true;
 }
 
+function isBlockedMediaDomain(domainOrUrl?: string): boolean {
+  const d = (domainOrUrl || "").toLowerCase();
+  if (!d) return false;
+  return (
+    WATERMARK_DOMAINS.some((x) => d.includes(x)) ||
+    BLOCKED_MEDIA_DOMAINS.some((x) => d.includes(x))
+  );
+}
+
 function isCleanPhoto(hit: GoogleImageHit): boolean {
   const domain = (hit.sourceDomain || "").toLowerCase();
-  if (WATERMARK_DOMAINS.some((d) => domain.includes(d))) return false;
+  const url = (hit.imageUrl || "").toLowerCase();
+  if (isBlockedMediaDomain(domain) || isBlockedMediaDomain(url)) return false;
   if (hasTextOrWatermarkHints(hit)) return false;
   if (hit.width && hit.height && hit.width <= hit.height) return false;
   if (!isLandscape(hit)) return false;
   return true;
+}
+
+/** True if an already-picked Google scene should be replaced. */
+export function isBadGoogleScenePick(scene: {
+  visualSource?: string;
+  imageUrl?: string | null;
+  sourceDomain?: string | null;
+}): boolean {
+  if (scene.visualSource !== "google" || !scene.imageUrl?.trim()) return false;
+  if (isBlockedMediaDomain(scene.sourceDomain || undefined)) return true;
+  if (isBlockedMediaDomain(scene.imageUrl)) return true;
+  return false;
 }
 
 /** Append negative keywords so Google Images returns cleaner photos. */
@@ -210,9 +254,9 @@ function scoreHit(
   }
   if (hasTextOrWatermarkHints(hit)) score -= 100;
   const domain = (hit.sourceDomain || "").toLowerCase();
-  if (WATERMARK_DOMAINS.some((d) => domain.includes(d))) score -= 120;
-  // YouTube thumbs often have baked-in text/logos — demote hard
-  if (domain.includes("youtube.com") || domain.includes("ytimg.com")) score -= 35;
+  if (isBlockedMediaDomain(domain) || isBlockedMediaDomain(hit.imageUrl)) {
+    score -= 200;
+  }
   if (personName) {
     score += personMatchScore(hit, personName);
     if (isGroupShot(hit)) score -= 50;
@@ -285,15 +329,11 @@ export async function searchGoogleImages(
     .sort((a, b) => (b.score || 0) - (a.score || 0));
 
   let results = scored;
-  // Soft backfill: landscape + non-stock only (still no watermark domains)
+  // Soft backfill: landscape + clean domains only (never social/stock thumbs)
   if (results.length < 1) {
     results = mapped
       .filter((r) => isLandscape(r))
-      .filter((r) => {
-        const domain = (r.sourceDomain || "").toLowerCase();
-        return !WATERMARK_DOMAINS.some((d) => domain.includes(d));
-      })
-      .filter((r) => !hasTextOrWatermarkHints(r))
+      .filter((r) => isCleanPhoto(r))
       .map((r) => ({ ...r, score: scoreHit(r, defaults, personName) }))
       .sort((a, b) => (b.score || 0) - (a.score || 0));
   }

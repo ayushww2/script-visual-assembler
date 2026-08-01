@@ -11,11 +11,13 @@ import { primaryPersonFromText } from "@/lib/search/personSubject";
 import { buildScenes, type SceneRecord } from "@/lib/jobs/scenes";
 import { generateMissingAiStills } from "@/lib/jobs/aiStills";
 import { balanceGoogleAiScenes, countSources } from "@/lib/jobs/balance";
+import { repairBadGoogleScenes } from "@/lib/jobs/repairGoogle";
 import {
   mapPartsParallel,
   PARALLEL_PARTS,
 } from "@/lib/jobs/parallelParts";
 import { mapPool } from "@/lib/jobs/pool";
+import { isBadGoogleScenePick } from "@/lib/search/google";
 import {
   buildAndUploadRenderPackage,
   HandoverPackagerError,
@@ -71,21 +73,7 @@ export async function processJob(jobId: string): Promise<void> {
         (job.scenesJson as unknown[]).length > 0
       ) {
         let scenes = job.scenesJson as unknown as SceneRecord[];
-        const previews = (job.previewsJson || {}) as Record<
-          string,
-          GoogleSearchPreview
-        >;
-        // Re-apply clean Google picker (no logo/text/watermark; 1-person lock).
-        if (Object.keys(previews).length) {
-          scenes = repickGoogleScenes(scenes, previews);
-          await prisma.job.update({
-            where: { id: jobId },
-            data: {
-              scenesJson: scenes as unknown as Prisma.InputJsonValue,
-              progress: "Re-picked clean Google stills (no logo/text/watermark)…",
-            },
-          });
-        }
+        const dirtyGoogle = scenes.filter((s) => isBadGoogleScenePick(s)).length;
         const missing = scenes.filter((s) => !s.imageUrl?.trim()).length;
 
         await prisma.job.update({
@@ -97,11 +85,31 @@ export async function processJob(jobId: string): Promise<void> {
             packageReady: false,
             packageUrl: null,
             packageError: null,
-            progress: job.aiBatch
-              ? `Resuming AI Batch${job.aiBatchId ? ` ${job.aiBatchId}` : ""}…`
-              : `Resuming AI stills · ${missing} remaining…`,
+            progress:
+              dirtyGoogle > 0
+                ? `Repair ${dirtyGoogle} dirty Google only · then ${missing} AI…`
+                : job.aiBatch
+                  ? `Resuming AI Batch${job.aiBatchId ? ` ${job.aiBatchId}` : ""}…`
+                  : `Resuming AI stills · ${missing} remaining…`,
           },
         });
+
+        // ONLY replace logo/text/watermark/YouTube/social Google picks.
+        // Good Google + finished AI scenes stay as-is.
+        if (dirtyGoogle > 0) {
+          const repaired = await repairBadGoogleScenes({
+            scenes,
+            onProgress,
+          });
+          scenes = repaired.scenes;
+          await prisma.job.update({
+            where: { id: jobId },
+            data: {
+              scenesJson: scenes as unknown as Prisma.InputJsonValue,
+              progress: `Google repair · fixed ${repaired.repaired}/${dirtyGoogle} · AI next…`,
+            },
+          });
+        }
 
         scenes = await generateMissingAiStills({
           jobId: job.id,
