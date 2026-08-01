@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getContactBoxConfig } from "@/lib/contactbox";
-import { getSearchApiKey } from "@/lib/env";
+import { getOpenAiImageConfig, getSearchApiKey } from "@/lib/env";
 import { prisma } from "@/lib/db";
 import {
   countTodaysPreviewQueries,
@@ -34,6 +34,12 @@ export async function GET() {
     },
     searchapi: {
       configured: Boolean(getSearchApiKey()),
+    },
+    openaiImage: {
+      configured: Boolean(getOpenAiImageConfig().apiKey),
+      model: getOpenAiImageConfig().model,
+      size: getOpenAiImageConfig().size,
+      quality: getOpenAiImageConfig().quality,
     },
     capacity: {
       usedToday,

@@ -8,6 +8,7 @@ import {
 } from "@/lib/jobs/limits";
 import type { GoogleSearchPreview } from "@/lib/search/google";
 import { buildScenes } from "@/lib/jobs/scenes";
+import { generateMissingAiStills } from "@/lib/jobs/aiStills";
 import {
   buildAndUploadRenderPackage,
   HandoverPackagerError,
@@ -123,11 +124,35 @@ export async function processJob(jobId: string): Promise<void> {
           scenesJson: scenes as unknown as Prisma.InputJsonValue,
           sceneCount: scenes.length,
           previewDone: true,
-          progress: "Building Remotion render package…",
+          progress: "Generating Mystery realism AI stills…",
         },
       });
 
       const niche = getNiche(job.niche);
+      const onProgress = async (message: string) => {
+        await prisma.job.update({
+          where: { id: jobId },
+          data: { progress: message },
+        });
+      };
+
+      scenes = await generateMissingAiStills({
+        jobId: job.id,
+        title: job.title,
+        niche: job.niche,
+        scenes,
+        onProgress,
+      });
+
+      await prisma.job.update({
+        where: { id: jobId },
+        data: {
+          scenesJson: scenes as unknown as Prisma.InputJsonValue,
+          sceneCount: scenes.length,
+          progress: "Building Remotion render package…",
+        },
+      });
+
       try {
         const handover = await buildAndUploadRenderPackage({
           jobId: job.id,
@@ -138,12 +163,7 @@ export async function processJob(jobId: string): Promise<void> {
           voiceoverDurationSec: job.voiceoverDurationSec,
           imagesOnly: true, // VO generation not wired yet
           createdAt: job.createdAt,
-          onProgress: async (message) => {
-            await prisma.job.update({
-              where: { id: jobId },
-              data: { progress: message },
-            });
-          },
+          onProgress,
         });
 
         scenes = handover.scenes;

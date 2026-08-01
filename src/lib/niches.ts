@@ -16,12 +16,13 @@ export const NICHES: Niche[] = [
     label: "Mystery",
     version: "v1",
     description:
-      "Clean documentary evidence — maps, artifacts, archives, places, soft investigative tone.",
+      "Clean documentary evidence — maps, artifacts, archives, places, soft investigative tone. AI stills use Mystery realism (gpt-image-2).",
     wpm: 160,
     promptGuide: `NICHE: Mystery documentary (YouTube).
 VO locked at 160 WPM (≈2.67 words/sec). Use that rate for scene timing when Whisper timestamps are missing.
 Prefer authentic evidence-style visuals when real photos exist: maps, manuscripts, archaeological finds, named places, archives, news stills, scientific fieldwork.
 Use AI for reconstructions, unrecorded ancient moments, speculative/prophetic ideas, impossible camera views, and conceptual tension — never fake “proof” photos.
+AI stills will be generated with the locked Mystery realism recipe (field/archive/lab photographic look, slight grain/haze, no glossy CGI).
 Queries should feel investigative and entity-first, not sensational filler words like mystery/secret/shocking.`,
   },
 ];

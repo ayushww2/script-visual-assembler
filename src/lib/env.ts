@@ -32,3 +32,19 @@ export function getSearchDefaults() {
     concurrency: Number(process.env.SEARCH_CONCURRENCY || "4"),
   };
 }
+
+export function getOpenAiImageConfig() {
+  return {
+    apiKey: process.env.OPENAI_IMAGE_API_KEY || "",
+    baseURL: (
+      process.env.OPENAI_IMAGE_BASE_URL || "https://api.openai.com/v1"
+    ).replace(/\/$/, ""),
+    model: process.env.OPENAI_IMAGE_MODEL || "gpt-image-2",
+    size: process.env.OPENAI_IMAGE_SIZE || "1536x1024",
+    quality: (process.env.OPENAI_IMAGE_QUALITY || "low") as
+      | "low"
+      | "medium"
+      | "high"
+      | "auto",
+  };
+}
