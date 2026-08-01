@@ -156,9 +156,13 @@ export async function buildAndUploadRenderPackage(
     };
   }
 
-  const voiceoverDurationSec = packageScenes.length
-    ? packageScenes[packageScenes.length - 1].endSec
-    : 0;
+  // Prefer known probed VO length; else last scene end (word-timed total)
+  const voiceoverDurationSec =
+    input.voiceoverDurationSec && input.voiceoverDurationSec > 0
+      ? input.voiceoverDurationSec
+      : packageScenes.length
+        ? packageScenes[packageScenes.length - 1].endSec
+        : 0;
 
   const pkg: RenderPackage = {
     scenes: packageScenes,

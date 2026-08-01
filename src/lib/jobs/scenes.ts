@@ -3,17 +3,14 @@ import {
   pickBestGoogleHit,
   type GoogleSearchPreview,
 } from "@/lib/search/google";
-import {
-  countWords,
-  durationSecFromWords,
-  getNiche,
-} from "@/lib/niches";
+import { countWords, getNiche } from "@/lib/niches";
+import { timeChunksAtWpm } from "@/lib/package/timing";
 
 /**
  * Canonical scene contract for downstream tools:
  *   { sceneId, words, imageUrl }
- * Timing can be Whisper timestamps or derived from niche WPM
- * (Mystery = 160 WPM → durationSec = wordCount / (160/60)).
+ * Timing from words @ niche WPM (Mystery = 160), optionally rescaled
+ * so the last endSec matches a known voiceoverDurationSec.
  */
 export type SceneRecord = {
   sceneId: string;
@@ -68,6 +65,8 @@ export function buildScenes(input: {
   result: DividerResult;
   previews?: Record<string, GoogleSearchPreview>;
   niche?: string | null;
+  /** If set (e.g. 26:15 → 1575), rescale all scene times so last endSec matches. */
+  voiceoverDurationSec?: number | null;
 }): SceneRecord[] {
   const niche = getNiche(input.niche);
   const googleByBeat = new Map<
@@ -91,7 +90,11 @@ export function buildScenes(input: {
     }
   }
 
-  let cursorSec = 0;
+  const timed = timeChunksAtWpm(
+    input.beats.map((b) => b.text),
+    niche.wpm,
+    input.voiceoverDurationSec,
+  );
   const usedGoogleUrls = new Set<string>();
 
   return input.beats.map((beat, i) => {
@@ -103,21 +106,16 @@ export function buildScenes(input: {
     if (hit?.imageUrl) usedGoogleUrls.add(hit.imageUrl);
     const sceneId = String(i + 1);
     const words = beat.text;
-    const wordCount = countWords(words);
-
-    // Exact VO timing from words @ niche WPM (Mystery = 160)
-    const durationSec = durationSecFromWords(wordCount, niche.id);
-    const startSec = cursorSec;
-    const endSec = cursorSec + durationSec;
-    cursorSec = endSec;
+    const t = timed[i];
+    const wordCount = t?.wordCount || countWords(words);
 
     const base = {
       sceneId,
       words,
       wordCount,
-      startSec: roundSec(startSec),
-      endSec: roundSec(endSec),
-      durationSec: roundSec(durationSec),
+      startSec: t.startSec,
+      endSec: t.endSec,
+      durationSec: t.durationSec,
       timingSource: "wpm" as const,
       id: `s${sceneId}`,
       index: i + 1,
@@ -202,10 +200,6 @@ export function toJobExportPayload(input: {
       durationSec: s.durationSec,
     })),
   };
-}
-
-function roundSec(n: number): number {
-  return Math.round(n * 100) / 100;
 }
 
 function uniqueCandidateUrls(

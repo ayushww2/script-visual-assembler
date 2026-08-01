@@ -44,6 +44,10 @@ export async function POST(req: Request) {
       title?: string;
       niche?: string;
       phase?: "google-first" | "full";
+      /** Total VO length in seconds (e.g. 1575 for 26:15). Scene times rescale to fit. */
+      voiceoverDurationSec?: number;
+      /** Optional "MM:SS" or "H:MM:SS" shorthand. */
+      voiceoverDuration?: string;
     };
 
     const script = body.script?.trim();
@@ -75,6 +79,11 @@ export async function POST(req: Request) {
       );
     }
 
+    const voiceoverDurationSec = parseVoiceoverDuration(
+      body.voiceoverDurationSec,
+      body.voiceoverDuration,
+    );
+
     const job = await prisma.job.create({
       data: {
         title: body.title?.trim() || deriveJobTitle(script),
@@ -83,6 +92,7 @@ export async function POST(req: Request) {
         phase: body.phase || "google-first",
         status: "queued",
         progress: "Queued — waiting for cloud worker…",
+        voiceoverDurationSec,
       },
     });
 
@@ -105,4 +115,21 @@ export async function POST(req: Request) {
     const message = error instanceof Error ? error.message : "Create failed";
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+/** Accept seconds number or "MM:SS" / "H:MM:SS". */
+export function parseVoiceoverDuration(
+  seconds?: number,
+  clock?: string,
+): number | null {
+  if (typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0) {
+    return seconds;
+  }
+  const raw = (clock || "").trim();
+  if (!raw) return null;
+  const parts = raw.split(":").map((p) => Number(p));
+  if (parts.some((n) => !Number.isFinite(n) || n < 0)) return null;
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return null;
 }

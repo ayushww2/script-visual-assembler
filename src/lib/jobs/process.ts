@@ -115,6 +115,7 @@ export async function processJob(jobId: string): Promise<void> {
         result: divided.result,
         previews,
         niche: job.niche,
+        voiceoverDurationSec: job.voiceoverDurationSec,
       });
 
       // Lock ~50/50 Google/AI before AI generation (excess Google → AI slots)
