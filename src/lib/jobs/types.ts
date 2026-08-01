@@ -28,6 +28,11 @@ export type JobListItem = {
   error: string | null;
   progress: string | null;
   previewDone: boolean;
+  packageReady: boolean;
+  packageUrl: string | null;
+  packageError: string | null;
+  imagesOnly: boolean;
+  voiceoverDurationSec: number | null;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;

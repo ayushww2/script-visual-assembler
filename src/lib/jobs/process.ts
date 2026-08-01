@@ -8,6 +8,11 @@ import {
 } from "@/lib/jobs/limits";
 import type { GoogleSearchPreview } from "@/lib/search/google";
 import { buildScenes } from "@/lib/jobs/scenes";
+import {
+  buildAndUploadRenderPackage,
+  HandoverPackagerError,
+} from "@/lib/package/handover";
+import { getNiche } from "@/lib/niches";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -42,6 +47,9 @@ export async function processJob(jobId: string): Promise<void> {
         startedAt: job.startedAt ?? new Date(),
         progress: "Reading script and building Google packs…",
         error: null,
+        packageReady: false,
+        packageUrl: null,
+        packageError: null,
       },
     });
 
@@ -101,7 +109,7 @@ export async function processJob(jobId: string): Promise<void> {
         }
       }
 
-      const scenes = buildScenes({
+      let scenes = buildScenes({
         beats: divided.beats,
         result: divided.result,
         previews,
@@ -111,15 +119,80 @@ export async function processJob(jobId: string): Promise<void> {
       await prisma.job.update({
         where: { id: jobId },
         data: {
-          status: "completed",
-          previewDone: true,
           previewsJson: previews as unknown as Prisma.InputJsonValue,
           scenesJson: scenes as unknown as Prisma.InputJsonValue,
           sceneCount: scenes.length,
-          progress: "Done",
-          completedAt: new Date(),
+          previewDone: true,
+          progress: "Building Remotion render package…",
         },
       });
+
+      const niche = getNiche(job.niche);
+      try {
+        const handover = await buildAndUploadRenderPackage({
+          jobId: job.id,
+          title: job.title,
+          nicheWpm: niche.wpm,
+          scenes,
+          voiceoverUrl: job.voiceoverUrl,
+          voiceoverDurationSec: job.voiceoverDurationSec,
+          imagesOnly: true, // VO generation not wired yet
+          createdAt: job.createdAt,
+          onProgress: async (message) => {
+            await prisma.job.update({
+              where: { id: jobId },
+              data: { progress: message },
+            });
+          },
+        });
+
+        scenes = handover.scenes;
+
+        await prisma.job.update({
+          where: { id: jobId },
+          data: {
+            status: "completed",
+            scenesJson: scenes as unknown as Prisma.InputJsonValue,
+            sceneCount: scenes.length,
+            packageReady: true,
+            packageUrl: handover.packageUrl,
+            packageJson: handover.packageJson as unknown as Prisma.InputJsonValue,
+            packageError: null,
+            imagesOnly: handover.imagesOnly,
+            voiceoverDurationSec:
+              handover.packageJson.voiceoverDurationSec ?? null,
+            progress: `Package ready · scenes=${handover.packageJson.sceneCount} · vo=${handover.packageJson.voiceoverDurationSec.toFixed(1)}s · wpm=${handover.packageJson.wpm}`,
+            completedAt: new Date(),
+          },
+        });
+      } catch (packErr) {
+        const issues =
+          packErr instanceof HandoverPackagerError
+            ? packErr.issues
+            : [];
+        const message =
+          packErr instanceof Error
+            ? packErr.message
+            : "Render package failed";
+        const detail = issues.length
+          ? `${message}: ${issues.slice(0, 6).join("; ")}`
+          : message;
+
+        // Keep scene preview usable, but do not claim package ready.
+        await prisma.job.update({
+          where: { id: jobId },
+          data: {
+            status: "completed",
+            scenesJson: scenes as unknown as Prisma.InputJsonValue,
+            sceneCount: scenes.length,
+            packageReady: false,
+            packageUrl: null,
+            packageError: detail,
+            progress: "Done (package not ready)",
+            completedAt: new Date(),
+          },
+        });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Job failed";
       await prisma.job.update({

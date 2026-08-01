@@ -42,6 +42,11 @@ type JobListItem = {
   aiCount: number;
   error: string | null;
   progress: string | null;
+  packageReady?: boolean;
+  packageUrl?: string | null;
+  packageError?: string | null;
+  imagesOnly?: boolean;
+  voiceoverDurationSec?: number | null;
   createdAt: string;
 };
 
@@ -89,6 +94,7 @@ type JobDetail = JobListItem & {
   wpm?: number;
   scenes: Scene[] | null;
   model: string | null;
+  packageJson?: unknown;
 };
 
 type Capacity = {
@@ -727,6 +733,12 @@ function JobDetailView({
     setExpandedId((current) => (current === id ? null : id));
   }
 
+  const packageUrl = detail.packageUrl || null;
+  const voSec =
+    typeof detail.voiceoverDurationSec === "number"
+      ? detail.voiceoverDurationSec
+      : null;
+
   return (
     <div>
       <button
@@ -736,6 +748,54 @@ function JobDetailView({
       >
         ← All jobs
       </button>
+
+      {packageUrl ? (
+        <div className="mt-5 rounded-2xl border border-[rgba(96,165,250,0.45)] bg-[rgba(59,130,246,0.12)] px-5 py-5">
+          <p className="text-xs font-semibold tracking-[0.18em] text-[var(--blue-bright)] uppercase">
+            Remotion handoff
+          </p>
+          <p className="mt-2 font-[family-name:var(--font-fraunces)] text-2xl text-white">
+            RENDER_PACKAGE_URL
+          </p>
+          <p className="mt-2 break-all font-mono text-sm text-[var(--blue-bright)]">
+            {packageUrl}
+          </p>
+          <p className="mt-3 text-sm text-[var(--ink-soft)]">
+            scenes={detail.sceneCount || scenes.length}
+            {" · "}
+            vo={voSec != null ? `${voSec.toFixed(1)}s` : "—"}
+            {" · "}
+            wpm={detail.wpm || 160}
+            {" · "}
+            package ready
+            {detail.imagesOnly ? " · images-only" : ""}
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => void navigator.clipboard.writeText(packageUrl)}
+              className="rounded-lg bg-[var(--blue)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--blue-deep)]"
+            >
+              Copy package URL
+            </button>
+            <a
+              href={packageUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg border border-[var(--line)] px-4 py-2 text-sm font-semibold text-white hover:border-[var(--blue)]"
+            >
+              Open package.json
+            </a>
+          </div>
+        </div>
+      ) : detail.status === "completed" && detail.packageError ? (
+        <div className="mt-5 rounded-2xl border border-[rgba(248,113,113,0.35)] bg-[rgba(248,113,113,0.08)] px-5 py-4">
+          <p className="text-xs font-semibold tracking-[0.18em] text-[var(--danger)] uppercase">
+            Package not ready
+          </p>
+          <p className="mt-2 text-sm text-white/90">{detail.packageError}</p>
+        </div>
+      ) : null}
 
       <div className="mt-5 flex flex-wrap items-start justify-between gap-4">
         <div>
