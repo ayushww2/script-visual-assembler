@@ -15,19 +15,27 @@ export async function POST(_req: Request, { params }: Params) {
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
     }
 
-    // Mark queued; instrumentation worker loop claims and awaits processJob.
+    // If scenes already built, resume AI/package only (skip director + Google).
+    const resumeScenes =
+      existing.previewDone &&
+      Array.isArray(existing.scenesJson) &&
+      (existing.scenesJson as unknown[]).length > 0;
+
     const job = await prisma.job.update({
       where: { id },
       data: {
         status: "queued",
         error: null,
-        progress: "Re-queued — worker will claim shortly…",
-        previewDone: false,
+        progress: resumeScenes
+          ? "Re-queued — resuming AI stills from saved scenes…"
+          : "Re-queued — worker will claim shortly…",
+        previewDone: resumeScenes ? true : false,
         packageReady: false,
         packageUrl: null,
         packageError: null,
         completedAt: null,
-        startedAt: null,
+        // Keep startedAt on resume so wall-time stays honest-ish
+        startedAt: resumeScenes ? existing.startedAt : null,
       },
     });
 

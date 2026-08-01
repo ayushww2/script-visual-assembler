@@ -13,12 +13,13 @@ export const GOOGLE_SEARCH_CONCURRENCY = Math.max(
 );
 
 /**
- * gpt-image-2 in parallel — target full Yellowstone (~180 AI) under ~6–7 min AI phase.
+ * gpt-image-2 in-flight cap.
+ * Org limit is often ~20 images/min — keep concurrency ≤8 and retry 429s.
  * Override with AI_STILL_CONCURRENCY env.
  */
 export const AI_STILL_CONCURRENCY = Math.max(
   1,
-  Number(process.env.AI_STILL_CONCURRENCY || 16) || 16,
+  Number(process.env.AI_STILL_CONCURRENCY || 8) || 8,
 );
 /**
  * When true, each AI still calls ContactBox to engineer the prompt (~15–18s each).

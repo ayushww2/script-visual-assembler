@@ -55,34 +55,39 @@ export async function processJob(jobId: string): Promise<void> {
     console.log("[jobs] processJob running", jobId, "was", job.status);
 
     try {
-      // Resume OpenAI AI Batch after deploy/restart (50% cheaper path).
+      const niche = getNiche(job.niche);
+      const onProgress = async (message: string) => {
+        await prisma.job.update({
+          where: { id: jobId },
+          data: { progress: message },
+        });
+      };
+
+      // Resume when scenes already built (e.g. AI rate-limit mid-job).
       if (
-        job.aiBatch &&
-        job.aiBatchId &&
         job.previewDone &&
         Array.isArray(job.scenesJson) &&
         (job.scenesJson as unknown[]).length > 0
       ) {
+        let scenes = job.scenesJson as unknown as Awaited<
+          ReturnType<typeof buildScenes>
+        >;
+        const missing = scenes.filter((s) => !s.imageUrl?.trim()).length;
+
         await prisma.job.update({
           where: { id: jobId },
           data: {
             status: "running",
             startedAt: job.startedAt ?? new Date(),
             error: null,
-            progress: `Resuming AI Batch ${job.aiBatchId}…`,
+            packageReady: false,
+            packageUrl: null,
+            packageError: null,
+            progress: job.aiBatch
+              ? `Resuming AI Batch${job.aiBatchId ? ` ${job.aiBatchId}` : ""}…`
+              : `Resuming AI stills · ${missing} remaining…`,
           },
         });
-
-        const niche = getNiche(job.niche);
-        let scenes = job.scenesJson as unknown as Awaited<
-          ReturnType<typeof buildScenes>
-        >;
-        const onProgress = async (message: string) => {
-          await prisma.job.update({
-            where: { id: jobId },
-            data: { progress: message },
-          });
-        };
 
         scenes = await generateMissingAiStills({
           jobId: job.id,
@@ -90,8 +95,15 @@ export async function processJob(jobId: string): Promise<void> {
           niche: job.niche,
           scenes,
           onProgress,
-          useBatch: true,
+          parts: PARALLEL_PARTS,
+          useBatch: Boolean(job.aiBatch),
           existingBatchId: job.aiBatchId,
+          onBatchCreated: async (batchId) => {
+            await prisma.job.update({
+              where: { id: jobId },
+              data: { aiBatchId: batchId },
+            });
+          },
         });
 
         await finishPackage({
@@ -220,14 +232,6 @@ export async function processJob(jobId: string): Promise<void> {
             : `Scenes ${scenes.length} · Google ${mix.google} · AI ${mix.ai} — splitting into ${PARALLEL_PARTS} parallel parts…`,
         },
       });
-
-      const niche = getNiche(job.niche);
-      const onProgress = async (message: string) => {
-        await prisma.job.update({
-          where: { id: jobId },
-          data: { progress: message },
-        });
-      };
 
       scenes = await generateMissingAiStills({
         jobId: job.id,
