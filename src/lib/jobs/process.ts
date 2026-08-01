@@ -105,6 +105,7 @@ export async function processJob(jobId: string): Promise<void> {
         beats: divided.beats,
         result: divided.result,
         previews,
+        niche: job.niche,
       });
 
       await prisma.job.update({

@@ -152,7 +152,7 @@ export function buildDirectorUserPrompt(
   nicheId?: string | null,
 ): string {
   const niche = getNiche(nicheId);
-  const minutes = estimateDurationMinutes(beats);
+  const minutes = estimateDurationMinutes(beats, niche.wpm);
   const targetStills = Math.round(minutes * 11);
   const targetGoogle = Math.round(targetStills * 0.6);
   const targetAi = Math.max(1, targetStills - targetGoogle);

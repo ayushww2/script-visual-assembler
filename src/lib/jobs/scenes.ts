@@ -1,7 +1,29 @@
 import type { Beat, DividerResult } from "@/lib/divider/schema";
 import type { GoogleSearchPreview } from "@/lib/search/google";
+import {
+  countWords,
+  durationSecFromWords,
+  getNiche,
+} from "@/lib/niches";
 
+/**
+ * Canonical scene contract for downstream tools:
+ *   { sceneId, words, imageUrl }
+ * Timing can be Whisper timestamps or derived from niche WPM
+ * (Mystery = 160 WPM → durationSec = wordCount / (160/60)).
+ */
 export type SceneRecord = {
+  sceneId: string;
+  words: string;
+  imageUrl: string | null;
+
+  wordCount: number;
+  startSec: number;
+  endSec: number;
+  durationSec: number;
+  timingSource: "whisper" | "wpm";
+
+  /** Internal / UI fields */
   id: string;
   index: number;
   beatId: string;
@@ -14,7 +36,6 @@ export type SceneRecord = {
   entityContext?: string;
   why?: string;
   priority?: number;
-  imageUrl?: string | null;
   thumbnailUrl?: string | null;
   sourceUrl?: string | null;
   sourceDomain?: string | null;
@@ -22,11 +43,28 @@ export type SceneRecord = {
   email?: string | null;
 };
 
+export type JobExportPayload = {
+  title: string;
+  scriptFull: string;
+  niche: string;
+  wpm: number;
+  scenes: Array<{
+    sceneId: string;
+    words: string;
+    imageUrl: string | null;
+    startSec: number;
+    endSec: number;
+    durationSec: number;
+  }>;
+};
+
 export function buildScenes(input: {
   beats: Beat[];
   result: DividerResult;
   previews?: Record<string, GoogleSearchPreview>;
+  niche?: string | null;
 }): SceneRecord[] {
+  const niche = getNiche(input.niche);
   const googleByBeat = new Map<
     string,
     DividerResult["googleSearches"][number]
@@ -48,20 +86,45 @@ export function buildScenes(input: {
     }
   }
 
+  let cursorSec = 0;
+
   return input.beats.map((beat, i) => {
     const google = googleByBeat.get(beat.id);
     const ai = aiByBeat.get(beat.id);
     const preview = google ? input.previews?.[google.query] : undefined;
     const hit = preview?.results?.[0];
+    const sceneId = String(i + 1);
+    const words = beat.text;
+    const wordCount = countWords(words);
+
+    const hasWhisper =
+      typeof beat.start === "number" && typeof beat.end === "number";
+    const durationSec = hasWhisper
+      ? Math.max(0.1, beat.end! - beat.start!)
+      : durationSecFromWords(wordCount, niche.id);
+    const startSec = hasWhisper ? beat.start! : cursorSec;
+    const endSec = hasWhisper ? beat.end! : cursorSec + durationSec;
+    if (!hasWhisper) cursorSec = endSec;
+
+    const base = {
+      sceneId,
+      words,
+      wordCount,
+      startSec: roundSec(startSec),
+      endSec: roundSec(endSec),
+      durationSec: roundSec(durationSec),
+      timingSource: (hasWhisper ? "whisper" : "wpm") as "whisper" | "wpm",
+      id: `s${sceneId}`,
+      index: i + 1,
+      beatId: beat.id,
+      scriptText: words,
+      start: beat.start,
+      end: beat.end,
+    };
 
     if (google) {
       return {
-        id: `s${i + 1}`,
-        index: i + 1,
-        beatId: beat.id,
-        scriptText: beat.text,
-        start: beat.start,
-        end: beat.end,
+        ...base,
         visualSource: "google" as const,
         query: google.query,
         subject: google.entityContext,
@@ -79,12 +142,7 @@ export function buildScenes(input: {
 
     if (ai) {
       return {
-        id: `s${i + 1}`,
-        index: i + 1,
-        beatId: beat.id,
-        scriptText: beat.text,
-        start: beat.start,
-        end: beat.end,
+        ...base,
         visualSource: "ai" as const,
         subject: ai.subject,
         entityContext: ai.visualIdea,
@@ -100,12 +158,7 @@ export function buildScenes(input: {
     }
 
     return {
-      id: `s${i + 1}`,
-      index: i + 1,
-      beatId: beat.id,
-      scriptText: beat.text,
-      start: beat.start,
-      end: beat.end,
+      ...base,
       visualSource: "unassigned" as const,
       imageUrl: null,
       thumbnailUrl: null,
@@ -115,4 +168,32 @@ export function buildScenes(input: {
       email: null,
     };
   });
+}
+
+/** Clean downstream payload: title + scriptFull + scenes[{sceneId, words, imageUrl, …}]. */
+export function toJobExportPayload(input: {
+  title?: string | null;
+  script: string;
+  niche?: string | null;
+  scenes: SceneRecord[];
+}): JobExportPayload {
+  const niche = getNiche(input.niche);
+  return {
+    title: input.title?.trim() || "Untitled",
+    scriptFull: input.script,
+    niche: niche.id,
+    wpm: niche.wpm,
+    scenes: input.scenes.map((s) => ({
+      sceneId: s.sceneId,
+      words: s.words,
+      imageUrl: s.imageUrl,
+      startSec: s.startSec,
+      endSec: s.endSec,
+      durationSec: s.durationSec,
+    })),
+  };
+}
+
+function roundSec(n: number): number {
+  return Math.round(n * 100) / 100;
 }

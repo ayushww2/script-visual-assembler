@@ -32,6 +32,7 @@ export async function GET(_req: Request, { params }: Params) {
           string,
           GoogleSearchPreview
         >) || undefined,
+        niche: job.niche,
       });
       job = await prisma.job.update({
         where: { id },

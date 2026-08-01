@@ -1,5 +1,10 @@
 import type { Job } from "@prisma/client";
 import type { JobListItem } from "./types";
+import {
+  toJobExportPayload,
+  type SceneRecord,
+} from "@/lib/jobs/scenes";
+import { getNiche } from "@/lib/niches";
 
 export function toJobListItem(job: Job): JobListItem {
   return {
@@ -23,13 +28,26 @@ export function toJobListItem(job: Job): JobListItem {
 }
 
 export function toJobDetail(job: Job) {
+  const scenes = (job.scenesJson as unknown as SceneRecord[] | null) || null;
+  const niche = getNiche(job.niche);
   return {
     ...toJobListItem(job),
     script: job.script,
+    scriptFull: job.script,
+    wpm: niche.wpm,
     beats: job.beatsJson,
     result: job.resultJson,
     previews: job.previewsJson,
-    scenes: job.scenesJson,
+    scenes,
+    export:
+      scenes && scenes.length
+        ? toJobExportPayload({
+            title: job.title,
+            script: job.script,
+            niche: job.niche,
+            scenes,
+          })
+        : null,
     usage: job.usageJson,
   };
 }

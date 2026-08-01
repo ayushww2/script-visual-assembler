@@ -15,6 +15,7 @@ type NicheOption = {
   label: string;
   version: string;
   description: string;
+  wpm: number;
 };
 
 const NICHES: NicheOption[] = [
@@ -22,8 +23,9 @@ const NICHES: NicheOption[] = [
     id: "mystery",
     label: "Mystery",
     version: "v1",
+    wpm: 160,
     description:
-      "Clean documentary evidence — maps, artifacts, archives, places, soft investigative tone.",
+      "Clean documentary evidence — maps, artifacts, archives, places, soft investigative tone. VO locked at 160 WPM.",
   },
 ];
 
@@ -47,10 +49,17 @@ function nicheLabel(id?: string | null) {
 }
 
 type Scene = {
+  sceneId?: string;
+  words?: string;
   id: string;
   index: number;
   beatId: string;
   scriptText: string;
+  wordCount?: number;
+  startSec?: number;
+  endSec?: number;
+  durationSec?: number;
+  timingSource?: "whisper" | "wpm";
   visualSource: "google" | "ai" | "unassigned";
   query?: string;
   subject?: string;
@@ -64,8 +73,18 @@ type Scene = {
   email?: string | null;
 };
 
+function sceneIdOf(scene: Scene) {
+  return scene.sceneId || String(scene.index) || scene.id;
+}
+
+function sceneWordsOf(scene: Scene) {
+  return scene.words || scene.scriptText || "";
+}
+
 type JobDetail = JobListItem & {
   script: string;
+  scriptFull?: string;
+  wpm?: number;
   scenes: Scene[] | null;
   model: string | null;
 };
@@ -373,6 +392,9 @@ export default function Home() {
                             </span>
                           ) : null}
                         </div>
+                        <p className="mt-1 text-xs font-medium text-[var(--blue-bright)]">
+                          {option.wpm} WPM
+                        </p>
                         <p className="mt-2 text-sm leading-relaxed text-[var(--ink-soft)]">
                           {option.description}
                         </p>
@@ -622,8 +644,10 @@ function JobDetailView({
             {detail.title || "Untitled"}
           </h2>
           <p className="mt-3 text-sm text-[var(--ink-soft)]">
-            {nicheLabel(detail.niche)} · {detail.sceneCount || scenes.length}{" "}
-            scenes · {detail.googleCount} Google · {detail.aiCount} AI
+            {nicheLabel(detail.niche)}
+            {detail.wpm ? ` · ${detail.wpm} WPM` : ""} ·{" "}
+            {detail.sceneCount || scenes.length} scenes · {detail.googleCount}{" "}
+            Google · {detail.aiCount} AI
             {detail.model ? ` · ${detail.model}` : ""}
           </p>
         </div>
@@ -661,6 +685,8 @@ function JobDetailView({
         ) : (
           <div className="mt-6 space-y-3">
             {scenes.map((scene) => {
+              const sid = sceneIdOf(scene);
+              const words = sceneWordsOf(scene);
               const open = expandedId === scene.id;
               const thumb = scene.thumbnailUrl || scene.imageUrl;
 
@@ -698,11 +724,19 @@ function JobDetailView({
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-xs font-semibold tracking-[0.16em] text-[var(--blue-bright)] uppercase">
-                          Scene {scene.index}
+                          Scene {sid}
                         </span>
                         <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] uppercase text-[var(--ink-soft)]">
                           {scene.visualSource}
                         </span>
+                        {typeof scene.durationSec === "number" ? (
+                          <span className="text-[11px] text-[var(--ink-soft)]">
+                            {scene.durationSec.toFixed(1)}s
+                            {scene.timingSource === "wpm" && detail.wpm
+                              ? ` · ${detail.wpm} WPM`
+                              : ""}
+                          </span>
+                        ) : null}
                       </div>
                       <p className="mt-1 truncate text-base font-semibold text-white">
                         {scene.query ||
@@ -710,7 +744,7 @@ function JobDetailView({
                           `Beat ${scene.beatId}`}
                       </p>
                       <p className="mt-1 line-clamp-1 text-xs text-[var(--ink-soft)]">
-                        {scene.scriptText}
+                        {words}
                       </p>
                     </div>
 
@@ -722,11 +756,28 @@ function JobDetailView({
                   {open ? (
                     <div className="grid gap-5 border-t border-[var(--line)] px-4 py-5 sm:px-5 lg:grid-cols-[minmax(0,1.05fr)_minmax(280px,0.95fr)]">
                       <div className="min-w-0 space-y-4">
-                        <Field label="Script part">
+                        <Field label="Words">
                           <p className="whitespace-pre-wrap text-sm leading-relaxed text-white/90">
-                            {scene.scriptText}
+                            {words}
                           </p>
                         </Field>
+                        {typeof scene.startSec === "number" &&
+                        typeof scene.endSec === "number" ? (
+                          <Field label="Timing">
+                            <p className="text-sm text-white/85">
+                              {scene.startSec.toFixed(2)}s –{" "}
+                              {scene.endSec.toFixed(2)}s
+                              {typeof scene.durationSec === "number"
+                                ? ` (${scene.durationSec.toFixed(2)}s)`
+                                : ""}
+                              {scene.timingSource === "wpm" && detail.wpm
+                                ? ` · from ${detail.wpm} WPM`
+                                : scene.timingSource === "whisper"
+                                  ? " · Whisper"
+                                  : ""}
+                            </p>
+                          </Field>
+                        ) : null}
                         {scene.entityContext ? (
                           <Field label="Visual context">
                             <p className="text-sm text-white/85">

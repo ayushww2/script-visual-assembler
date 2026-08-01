@@ -78,7 +78,10 @@ function splitSentences(text: string): string[] {
   return parts.length ? parts : [text];
 }
 
-export function estimateDurationMinutes(beats: Beat[]): number {
+export function estimateDurationMinutes(
+  beats: Beat[],
+  wpm = 160,
+): number {
   const withTiming = beats.filter(
     (b) => typeof b.start === "number" && typeof b.end === "number",
   );
@@ -91,6 +94,6 @@ export function estimateDurationMinutes(beats: Beat[]): number {
     (n, b) => n + b.text.split(/\s+/).filter(Boolean).length,
     0,
   );
-  // ~150 wpm narration estimate
-  return Math.max(0.5, words / 150);
+  // Niche VO rate (Mystery = 160 WPM) when Whisper timestamps are absent
+  return Math.max(0.5, words / Math.max(1, wpm));
 }
