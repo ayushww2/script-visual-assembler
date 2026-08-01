@@ -47,6 +47,8 @@ type JobListItem = {
   packageError?: string | null;
   imagesOnly?: boolean;
   voiceoverDurationSec?: number | null;
+  aiBatch?: boolean;
+  aiBatchId?: string | null;
   createdAt: string;
 };
 
@@ -165,6 +167,7 @@ export default function Home() {
   const [script, setScript] = useState("");
   const [title, setTitle] = useState("");
   const [niche, setNiche] = useState("mystery");
+  const [aiBatch, setAiBatch] = useState(false);
   const [jobs, setJobs] = useState<JobListItem[]>([]);
   const [capacity, setCapacity] = useState<Capacity | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -297,6 +300,7 @@ export default function Home() {
           title: title.trim() || undefined,
           niche,
           phase: "google-first",
+          aiBatch,
         }),
       });
       const json = (await res.json()) as {
@@ -308,6 +312,7 @@ export default function Home() {
       setScript("");
       setTitle("");
       setNiche("mystery");
+      setAiBatch(false);
       setDocxName(null);
       setSelectedId(null);
       setDetail(null);
@@ -521,13 +526,38 @@ export default function Home() {
                 />
               </Panel>
 
+              <Panel title="AI image pricing">
+                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-4 py-4">
+                  <input
+                    type="checkbox"
+                    checked={aiBatch}
+                    onChange={(e) => setAiBatch(e.target.checked)}
+                    className="mt-1 h-4 w-4 accent-[var(--blue)]"
+                  />
+                  <span>
+                    <span className="block text-sm font-semibold text-white">
+                      OpenAI Batch API — 50% cheaper
+                    </span>
+                    <span className="mt-1 block text-sm leading-relaxed text-[var(--ink-soft)]">
+                      Same gpt-image-2 quality. AI stills are queued as a batch
+                      instead of realtime. Can take up to 24 hours. Leave off for
+                      the fast (~10 min) path.
+                    </span>
+                  </span>
+                </label>
+              </Panel>
+
               <button
                 type="button"
                 onClick={submitJob}
                 disabled={submitting || uploadingDocx || !script.trim()}
                 className="rounded-xl bg-[var(--blue)] px-6 py-3.5 text-sm font-semibold text-white shadow-[0_10px_28px_rgba(37,99,235,0.35)] transition hover:bg-[var(--blue-deep)] hover:shadow-[0_14px_34px_rgba(37,99,235,0.45)] disabled:opacity-45 disabled:shadow-none"
               >
-                {submitting ? "Submitting…" : "Submit job"}
+                {submitting
+                  ? "Submitting…"
+                  : aiBatch
+                    ? "Submit job (Batch / 50% off)"
+                    : "Submit job"}
               </button>
 
               {error ? (
@@ -774,6 +804,7 @@ function JobDetailView({
             {" · "}
             package ready
             {detail.imagesOnly ? " · images-only" : ""}
+            {detail.aiBatch ? " · AI Batch 50% off" : ""}
           </p>
           <div className="mt-4 flex flex-wrap gap-3">
             <button

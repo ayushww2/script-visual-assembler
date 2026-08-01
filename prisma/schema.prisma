@@ -41,6 +41,10 @@ model Job {
   voiceoverUrl   String?
   voiceoverDurationSec Float?
   imagesOnly     Boolean   @default(true)
+  /** When true, AI stills use OpenAI Batch API (~50% cheaper, up to 24h). */
+  aiBatch        Boolean   @default(false)
+  /** OpenAI batch id while AI Batch job is in flight (resume after restart). */
+  aiBatchId      String?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   startedAt      DateTime?

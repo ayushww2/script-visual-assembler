@@ -27,6 +27,8 @@ export function toJobListItem(job: Job): JobListItem {
     packageError: job.packageError,
     imagesOnly: job.imagesOnly,
     voiceoverDurationSec: job.voiceoverDurationSec,
+    aiBatch: job.aiBatch,
+    aiBatchId: job.aiBatchId,
     createdAt: job.createdAt.toISOString(),
     startedAt: job.startedAt?.toISOString() ?? null,
     completedAt: job.completedAt?.toISOString() ?? null,

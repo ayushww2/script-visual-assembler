@@ -1,6 +1,7 @@
 import type { SceneRecord } from "@/lib/jobs/scenes";
 import { uploadToR2 } from "@/lib/r2";
 import { generateGptImage } from "@/lib/images/openaiImage";
+import { generateGptImagesViaBatch } from "@/lib/images/openaiImageBatch";
 import {
   composeMysteryImagePrompt,
   engineerMysteryRealismPrompt,
@@ -16,12 +17,78 @@ import { mapPartsParallel, PARALLEL_PARTS } from "@/lib/jobs/parallelParts";
 
 export type AiStillProgress = (message: string) => Promise<void> | void;
 
+function promptForScene(
+  scene: SceneRecord,
+  title?: string | null,
+): string {
+  const visualIdea =
+    scene.entityContext ||
+    scene.subject ||
+    scene.words ||
+    "documentary evidence still";
+
+  if (!AI_PROMPT_ENGINEER) {
+    return composeMysteryImagePrompt({
+      visualIdea,
+      subject: scene.subject,
+      title: title || undefined,
+      words: scene.words,
+    });
+  }
+
+  // Sync path only — batch mode always uses local compose (engineer would defeat savings).
+  return composeMysteryImagePrompt({
+    visualIdea,
+    subject: scene.subject,
+    title: title || undefined,
+    words: scene.words,
+  });
+}
+
+async function promptForSceneRealtime(
+  scene: SceneRecord,
+  title?: string | null,
+): Promise<string> {
+  const visualIdea =
+    scene.entityContext ||
+    scene.subject ||
+    scene.words ||
+    "documentary evidence still";
+
+  if (!AI_PROMPT_ENGINEER) {
+    return composeMysteryImagePrompt({
+      visualIdea,
+      subject: scene.subject,
+      title: title || undefined,
+      words: scene.words,
+    });
+  }
+
+  try {
+    const pack = await engineerMysteryRealismPrompt({
+      title: title || undefined,
+      visualIdea,
+      subject: scene.subject,
+      words: scene.words,
+      intendedUse: "evidence still",
+      preferredStyle: "color documentary",
+    });
+    return packToImagePrompt(pack);
+  } catch {
+    return composeMysteryImagePrompt({
+      visualIdea,
+      subject: scene.subject,
+      title: title || undefined,
+      words: scene.words,
+    });
+  }
+}
+
 /**
  * Generate Mystery realism stills for scenes missing imageUrl.
- * Default: local realism lock → gpt-image-2 → R2 (no per-still ContactBox).
- * Set AI_PROMPT_ENGINEER=1 to restore ContactBox prompt engineering (slower).
  *
- * Scenes are split into PARALLEL_PARTS (default 10) and all parts run at once.
+ * - Default realtime: 10 parallel parts → gpt-image-2
+ * - aiBatch: OpenAI Batch API (~50% cheaper, up to 24h)
  */
 export async function generateMissingAiStills(input: {
   jobId: string;
@@ -29,13 +96,100 @@ export async function generateMissingAiStills(input: {
   niche?: string | null;
   scenes: SceneRecord[];
   onProgress?: AiStillProgress;
-  /** Override total in-flight gens across all parts. */
   concurrency?: number;
   parts?: number;
+  /** OpenAI Batch API — 50% cheaper, async up to 24h */
+  useBatch?: boolean;
+  existingBatchId?: string | null;
+  onBatchCreated?: (batchId: string) => Promise<void> | void;
 }): Promise<SceneRecord[]> {
   const needAi = input.scenes.filter((s) => !s.imageUrl?.trim());
   if (!needAi.length) return input.scenes;
 
+  if (input.useBatch) {
+    return generateMissingAiStillsBatch(input, needAi);
+  }
+  return generateMissingAiStillsRealtime(input, needAi);
+}
+
+async function generateMissingAiStillsBatch(
+  input: {
+    jobId: string;
+    title?: string | null;
+    scenes: SceneRecord[];
+    onProgress?: AiStillProgress;
+    existingBatchId?: string | null;
+    onBatchCreated?: (batchId: string) => Promise<void> | void;
+  },
+  needAi: SceneRecord[],
+): Promise<SceneRecord[]> {
+  const byId = new Map(input.scenes.map((s) => [s.id, { ...s }]));
+
+  const requests = needAi.map((scene) => ({
+    customId: `scene-${scene.index}`,
+    prompt: promptForScene(scene, input.title),
+  }));
+
+  const results = await generateGptImagesViaBatch({
+    requests,
+    existingBatchId: input.existingBatchId,
+    onBatchCreated: input.onBatchCreated,
+    onProgress: input.onProgress,
+  });
+
+  let uploaded = 0;
+  let failed = 0;
+  for (const scene of needAi) {
+    const hit = results.get(`scene-${scene.index}`);
+    if (!hit?.bytes) {
+      failed += 1;
+      continue;
+    }
+    const ext = (hit.contentType || "image/png").includes("jpeg") ? "jpg" : "png";
+    const key = stillKey(input.jobId, scene.index, ext);
+    const put = await uploadToR2({
+      key,
+      body: hit.bytes,
+      contentType: hit.contentType || "image/png",
+    });
+    byId.set(scene.id, {
+      ...scene,
+      visualSource:
+        scene.visualSource === "unassigned" ? "ai" : scene.visualSource,
+      imageUrl: put.url,
+      thumbnailUrl: put.url,
+      r2Url: put.url,
+      why: scene.why || "AI documentary realism still (Batch API)",
+    });
+    uploaded += 1;
+    if (uploaded === 1 || uploaded % 10 === 0 || uploaded === needAi.length) {
+      await input.onProgress?.(
+        `AI Batch upload R2 ${uploaded}/${needAi.length}` +
+          (failed ? ` · ${failed} failed` : ""),
+      );
+    }
+  }
+
+  if (uploaded === 0 && needAi.length > 0) {
+    throw new Error(
+      `AI Batch produced 0 usable images (${failed} failed of ${needAi.length})`,
+    );
+  }
+
+  return input.scenes.map((s) => byId.get(s.id) || s);
+}
+
+async function generateMissingAiStillsRealtime(
+  input: {
+    jobId: string;
+    title?: string | null;
+    scenes: SceneRecord[];
+    onProgress?: AiStillProgress;
+    concurrency?: number;
+    parts?: number;
+  },
+  needAi: SceneRecord[],
+): Promise<SceneRecord[]> {
   const byId = new Map(input.scenes.map((s) => [s.id, { ...s }]));
   let done = 0;
   let lastProgressAt = 0;
@@ -47,45 +201,10 @@ export async function generateMissingAiStills(input: {
     input.concurrency ?? AI_STILL_CONCURRENCY,
   );
   const parts = Math.max(1, input.parts ?? PARALLEL_PARTS);
-  // Spread concurrency across parts so 10×N doesn't explode rate limits.
   const perPart = Math.max(1, Math.ceil(totalConcurrency / parts));
 
   async function runOne(scene: SceneRecord) {
-    const visualIdea =
-      scene.entityContext ||
-      scene.subject ||
-      scene.words ||
-      "documentary evidence still";
-
-    let imagePrompt: string;
-    if (AI_PROMPT_ENGINEER) {
-      try {
-        const pack = await engineerMysteryRealismPrompt({
-          title: input.title || undefined,
-          visualIdea,
-          subject: scene.subject,
-          words: scene.words,
-          intendedUse: "evidence still",
-          preferredStyle: "color documentary",
-        });
-        imagePrompt = packToImagePrompt(pack);
-      } catch {
-        imagePrompt = composeMysteryImagePrompt({
-          visualIdea,
-          subject: scene.subject,
-          title: input.title || undefined,
-          words: scene.words,
-        });
-      }
-    } else {
-      imagePrompt = composeMysteryImagePrompt({
-        visualIdea,
-        subject: scene.subject,
-        title: input.title || undefined,
-        words: scene.words,
-      });
-    }
-
+    const imagePrompt = await promptForSceneRealtime(scene, input.title);
     const image = await generateGptImage({ prompt: imagePrompt });
     const ext = image.contentType.includes("jpeg") ? "jpg" : "png";
     const key = stillKey(input.jobId, scene.index, ext);

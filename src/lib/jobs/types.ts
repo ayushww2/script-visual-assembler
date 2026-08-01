@@ -33,6 +33,9 @@ export type JobListItem = {
   packageError: string | null;
   imagesOnly: boolean;
   voiceoverDurationSec: number | null;
+  /** OpenAI Batch API for AI stills (~50% cheaper, up to 24h). */
+  aiBatch: boolean;
+  aiBatchId: string | null;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;

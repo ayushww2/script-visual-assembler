@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Job" ADD COLUMN "aiBatch" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "Job" ADD COLUMN "aiBatchId" TEXT;

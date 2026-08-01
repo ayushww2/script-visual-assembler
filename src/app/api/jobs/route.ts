@@ -46,6 +46,8 @@ export async function POST(req: Request) {
       voiceoverDurationSec?: number;
       /** Optional "MM:SS" or "H:MM:SS" shorthand. */
       voiceoverDuration?: string;
+      /** OpenAI Batch API for AI stills — ~50% cheaper, up to 24h. */
+      aiBatch?: boolean;
     };
 
     const script = body.script?.trim();
@@ -82,6 +84,7 @@ export async function POST(req: Request) {
       body.voiceoverDuration,
     );
 
+    const aiBatch = Boolean(body.aiBatch);
     const job = await prisma.job.create({
       data: {
         title: body.title?.trim() || deriveJobTitle(script),
@@ -89,8 +92,11 @@ export async function POST(req: Request) {
         script,
         phase: body.phase || "google-first",
         status: "queued",
-        progress: "Queued — cloud worker will claim shortly…",
+        progress: aiBatch
+          ? "Queued — AI Batch mode (50% cheaper, up to 24h)…"
+          : "Queued — cloud worker will claim shortly…",
         voiceoverDurationSec,
+        aiBatch,
       },
     });
 

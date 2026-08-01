@@ -53,20 +53,71 @@ export async function processJob(jobId: string): Promise<void> {
     }
 
     console.log("[jobs] processJob running", jobId, "was", job.status);
-    await prisma.job.update({
-      where: { id: jobId },
-      data: {
-        status: "running",
-        startedAt: job.startedAt ?? new Date(),
-        progress: "Reading script and building Google packs…",
-        error: null,
-        packageReady: false,
-        packageUrl: null,
-        packageError: null,
-      },
-    });
 
     try {
+      // Resume OpenAI AI Batch after deploy/restart (50% cheaper path).
+      if (
+        job.aiBatch &&
+        job.aiBatchId &&
+        job.previewDone &&
+        Array.isArray(job.scenesJson) &&
+        (job.scenesJson as unknown[]).length > 0
+      ) {
+        await prisma.job.update({
+          where: { id: jobId },
+          data: {
+            status: "running",
+            startedAt: job.startedAt ?? new Date(),
+            error: null,
+            progress: `Resuming AI Batch ${job.aiBatchId}…`,
+          },
+        });
+
+        const niche = getNiche(job.niche);
+        let scenes = job.scenesJson as unknown as Awaited<
+          ReturnType<typeof buildScenes>
+        >;
+        const onProgress = async (message: string) => {
+          await prisma.job.update({
+            where: { id: jobId },
+            data: { progress: message },
+          });
+        };
+
+        scenes = await generateMissingAiStills({
+          jobId: job.id,
+          title: job.title,
+          niche: job.niche,
+          scenes,
+          onProgress,
+          useBatch: true,
+          existingBatchId: job.aiBatchId,
+        });
+
+        await finishPackage({
+          jobId,
+          job,
+          scenes,
+          nicheWpm: niche.wpm,
+          onProgress,
+        });
+        return;
+      }
+
+      await prisma.job.update({
+        where: { id: jobId },
+        data: {
+          status: "running",
+          startedAt: job.startedAt ?? new Date(),
+          progress: "Reading script and building Google packs…",
+          error: null,
+          packageReady: false,
+          packageUrl: null,
+          packageError: null,
+          aiBatchId: null,
+        },
+      });
+
       const divided = await runScriptDivider({
         script: job.script,
         phase: (job.phase as "google-first" | "full") || "google-first",
@@ -164,7 +215,9 @@ export async function processJob(jobId: string): Promise<void> {
           googleCount: mix.google,
           aiCount: mix.ai,
           previewDone: true,
-          progress: `Scenes ${scenes.length} · Google ${mix.google} · AI ${mix.ai} — splitting into ${PARALLEL_PARTS} parallel parts…`,
+          progress: job.aiBatch
+            ? `Scenes ${scenes.length} · Google ${mix.google} · AI ${mix.ai} — AI Batch (50% cheaper)…`
+            : `Scenes ${scenes.length} · Google ${mix.google} · AI ${mix.ai} — splitting into ${PARALLEL_PARTS} parallel parts…`,
         },
       });
 
@@ -176,7 +229,6 @@ export async function processJob(jobId: string): Promise<void> {
         });
       };
 
-      // AI stills: same scenes split into PARALLEL_PARTS, all parts run simultaneously.
       scenes = await generateMissingAiStills({
         jobId: job.id,
         title: job.title,
@@ -184,76 +236,23 @@ export async function processJob(jobId: string): Promise<void> {
         scenes,
         onProgress,
         parts: PARALLEL_PARTS,
-      });
-
-      await prisma.job.update({
-        where: { id: jobId },
-        data: {
-          scenesJson: scenes as unknown as Prisma.InputJsonValue,
-          sceneCount: scenes.length,
-          progress: "Building Remotion render package…",
+        useBatch: Boolean(job.aiBatch),
+        existingBatchId: job.aiBatchId,
+        onBatchCreated: async (batchId) => {
+          await prisma.job.update({
+            where: { id: jobId },
+            data: { aiBatchId: batchId },
+          });
         },
       });
 
-      try {
-        const handover = await buildAndUploadRenderPackage({
-          jobId: job.id,
-          title: job.title,
-          nicheWpm: niche.wpm,
-          scenes,
-          voiceoverUrl: job.voiceoverUrl,
-          voiceoverDurationSec: job.voiceoverDurationSec,
-          imagesOnly: true, // VO generation not wired yet
-          createdAt: job.createdAt,
-          onProgress,
-        });
-
-        scenes = handover.scenes;
-
-        await prisma.job.update({
-          where: { id: jobId },
-          data: {
-            status: "completed",
-            scenesJson: scenes as unknown as Prisma.InputJsonValue,
-            sceneCount: scenes.length,
-            packageReady: true,
-            packageUrl: handover.packageUrl,
-            packageJson: handover.packageJson as unknown as Prisma.InputJsonValue,
-            packageError: null,
-            imagesOnly: handover.imagesOnly,
-            voiceoverDurationSec: handover.voiceoverDurationSec,
-            progress: `Package ready · scenes=${handover.packageJson.scenes.length} · vo=${handover.voiceoverDurationSec.toFixed(1)}s · wpm=${niche.wpm}`,
-            completedAt: new Date(),
-          },
-        });
-      } catch (packErr) {
-        const issues =
-          packErr instanceof HandoverPackagerError
-            ? packErr.issues
-            : [];
-        const message =
-          packErr instanceof Error
-            ? packErr.message
-            : "Render package failed";
-        const detail = issues.length
-          ? `${message}: ${issues.slice(0, 6).join("; ")}`
-          : message;
-
-        // Keep scene preview usable, but do not claim package ready.
-        await prisma.job.update({
-          where: { id: jobId },
-          data: {
-            status: "completed",
-            scenesJson: scenes as unknown as Prisma.InputJsonValue,
-            sceneCount: scenes.length,
-            packageReady: false,
-            packageUrl: null,
-            packageError: detail,
-            progress: "Done (package not ready)",
-            completedAt: new Date(),
-          },
-        });
-      }
+      await finishPackage({
+        jobId,
+        job,
+        scenes,
+        nicheWpm: niche.wpm,
+        onProgress,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Job failed";
       await prisma.job.update({
@@ -267,6 +266,86 @@ export async function processJob(jobId: string): Promise<void> {
       });
     }
   });
+}
+
+async function finishPackage(input: {
+  jobId: string;
+  job: {
+    id: string;
+    title: string | null;
+    voiceoverUrl: string | null;
+    voiceoverDurationSec: number | null;
+    createdAt: Date;
+  };
+  scenes: Awaited<ReturnType<typeof buildScenes>>;
+  nicheWpm: number;
+  onProgress: (message: string) => Promise<void>;
+}): Promise<void> {
+  let scenes = input.scenes;
+
+  await prisma.job.update({
+    where: { id: input.jobId },
+    data: {
+      scenesJson: scenes as unknown as Prisma.InputJsonValue,
+      sceneCount: scenes.length,
+      progress: "Building Remotion render package…",
+    },
+  });
+
+  try {
+    const handover = await buildAndUploadRenderPackage({
+      jobId: input.job.id,
+      title: input.job.title,
+      nicheWpm: input.nicheWpm,
+      scenes,
+      voiceoverUrl: input.job.voiceoverUrl,
+      voiceoverDurationSec: input.job.voiceoverDurationSec,
+      imagesOnly: true,
+      createdAt: input.job.createdAt,
+      onProgress: input.onProgress,
+    });
+
+    scenes = handover.scenes;
+
+    await prisma.job.update({
+      where: { id: input.jobId },
+      data: {
+        status: "completed",
+        scenesJson: scenes as unknown as Prisma.InputJsonValue,
+        sceneCount: scenes.length,
+        packageReady: true,
+        packageUrl: handover.packageUrl,
+        packageJson: handover.packageJson as unknown as Prisma.InputJsonValue,
+        packageError: null,
+        imagesOnly: handover.imagesOnly,
+        voiceoverDurationSec: handover.voiceoverDurationSec,
+        progress: `Package ready · scenes=${handover.packageJson.scenes.length} · vo=${handover.voiceoverDurationSec.toFixed(1)}s · wpm=${input.nicheWpm}`,
+        completedAt: new Date(),
+      },
+    });
+  } catch (packErr) {
+    const issues =
+      packErr instanceof HandoverPackagerError ? packErr.issues : [];
+    const message =
+      packErr instanceof Error ? packErr.message : "Render package failed";
+    const detail = issues.length
+      ? `${message}: ${issues.slice(0, 6).join("; ")}`
+      : message;
+
+    await prisma.job.update({
+      where: { id: input.jobId },
+      data: {
+        status: "completed",
+        scenesJson: scenes as unknown as Prisma.InputJsonValue,
+        sceneCount: scenes.length,
+        packageReady: false,
+        packageUrl: null,
+        packageError: detail,
+        progress: "Done (package not ready)",
+        completedAt: new Date(),
+      },
+    });
+  }
 }
 
 /** Recover jobs stuck queued/running after a deploy restart. */
