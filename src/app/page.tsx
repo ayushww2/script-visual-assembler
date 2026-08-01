@@ -1,62 +1,50 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 
 type JobListItem = {
   id: string;
   title: string | null;
   status: string;
-  phase: string;
   beatCount: number;
+  sceneCount: number;
   googleCount: number;
   aiCount: number;
-  model: string | null;
   error: string | null;
   progress: string | null;
-  previewDone: boolean;
   createdAt: string;
-  startedAt: string | null;
-  completedAt: string | null;
 };
 
-type Beat = { id: string; text: string; start?: number; end?: number };
-
-type GooglePack = {
-  query: string;
-  entityContext: string;
-  whyGoogle: string;
-  relatedBeatIds: string[];
-  priority: number;
-  alternateQueries?: string[];
-};
-
-type AiItem = {
-  subject: string;
-  visualIdea: string;
-  whyAiNotGoogle: string;
-  relatedBeatIds: string[];
-  priority: number;
-};
-
-type PreviewHit = {
-  title: string;
-  imageUrl: string;
-  thumbnailUrl?: string;
-  sourceDomain?: string;
-};
-
-type PreviewResult = {
-  query: string;
-  results: PreviewHit[];
-  filteredOut: number;
-  error?: string;
+type Scene = {
+  id: string;
+  index: number;
+  beatId: string;
+  scriptText: string;
+  start?: number;
+  end?: number;
+  visualSource: "google" | "ai" | "unassigned";
+  query?: string;
+  subject?: string;
+  entityContext?: string;
+  why?: string;
+  imageUrl?: string | null;
+  thumbnailUrl?: string | null;
+  sourceUrl?: string | null;
+  sourceDomain?: string | null;
+  r2Url?: string | null;
+  email?: string | null;
 };
 
 type JobDetail = JobListItem & {
   script: string;
-  beats: Beat[] | null;
-  result: { googleSearches: GooglePack[]; aiGenerate: AiItem[] } | null;
-  previews: Record<string, PreviewResult> | null;
+  scenes: Scene[] | null;
+  model: string | null;
 };
 
 type Capacity = {
@@ -65,20 +53,55 @@ type Capacity = {
   remaining: number;
 };
 
+type DayGroup = {
+  key: string;
+  label: string;
+  count: number;
+  jobs: JobListItem[];
+};
+
 function statusLabel(status: string) {
-  if (status === "queued") return "Queued";
-  if (status === "running") return "Running";
+  if (status === "queued" || status === "running") return "Processing";
   if (status === "completed") return "Done";
   if (status === "failed") return "Failed";
   return status;
 }
 
-function formatWhen(iso: string) {
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
+function isProcessing(status: string) {
+  return status === "queued" || status === "running";
+}
+
+function dayKey(iso: string) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function dayLabel(iso: string) {
+  return new Date(iso).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function groupJobsByDay(jobs: JobListItem[]): DayGroup[] {
+  const map = new Map<string, DayGroup>();
+  for (const job of jobs) {
+    const key = dayKey(job.createdAt);
+    const existing = map.get(key);
+    if (existing) {
+      existing.jobs.push(job);
+      existing.count += 1;
+    } else {
+      map.set(key, {
+        key,
+        label: dayLabel(job.createdAt),
+        count: 1,
+        jobs: [job],
+      });
+    }
   }
+  return Array.from(map.values());
 }
 
 export default function Home() {
@@ -87,9 +110,13 @@ export default function Home() {
   const [jobs, setJobs] = useState<JobListItem[]>([]);
   const [capacity, setCapacity] = useState<Capacity | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
   const [detail, setDetail] = useState<JobDetail | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [openDays, setOpenDays] = useState<Record<string, boolean>>({});
+
+  const dayGroups = useMemo(() => groupJobsByDay(jobs), [jobs]);
 
   const loadJobs = useCallback(async () => {
     const res = await fetch("/api/jobs");
@@ -117,8 +144,19 @@ export default function Home() {
   }, [loadJobs]);
 
   useEffect(() => {
+    if (!dayGroups.length) return;
+    setOpenDays((prev) => {
+      const next = { ...prev };
+      // Keep newest day open by default
+      if (next[dayGroups[0].key] === undefined) next[dayGroups[0].key] = true;
+      return next;
+    });
+  }, [dayGroups]);
+
+  useEffect(() => {
     if (!selectedId) {
       setDetail(null);
+      setSelectedSceneId(null);
       return;
     }
     loadDetail(selectedId).catch((e) =>
@@ -126,29 +164,20 @@ export default function Home() {
     );
   }, [selectedId, loadDetail]);
 
-  // Poll active job + list
   useEffect(() => {
-    const active =
-      detail &&
-      (detail.status === "queued" || detail.status === "running")
-        ? detail.id
-        : jobs.find((j) => j.status === "queued" || j.status === "running")?.id;
-
-    if (!active) return;
+    const hasActive = jobs.some((j) => isProcessing(j.status));
+    if (!hasActive && !(detail && isProcessing(detail.status))) return;
 
     const timer = setInterval(() => {
       loadJobs().catch(() => undefined);
       if (selectedId) loadDetail(selectedId).catch(() => undefined);
     }, 2500);
-
     return () => clearInterval(timer);
-  }, [detail, jobs, selectedId, loadJobs, loadDetail]);
+  }, [jobs, detail, selectedId, loadJobs, loadDetail]);
 
-  const beatLookup = useMemo(() => {
-    const map = new Map<string, string>();
-    detail?.beats?.forEach((b) => map.set(b.id, b.text));
-    return map;
-  }, [detail]);
+  const scenes = detail?.scenes || [];
+  const selectedScene =
+    scenes.find((s) => s.id === selectedSceneId) || null;
 
   async function submitJob() {
     setSubmitting(true);
@@ -164,7 +193,6 @@ export default function Home() {
         }),
       });
       const json = (await res.json()) as {
-        job?: JobListItem;
         capacity?: Capacity;
         error?: string;
       };
@@ -172,8 +200,11 @@ export default function Home() {
       if (json.capacity) setCapacity(json.capacity);
       setScript("");
       setTitle("");
+      // Stay on submit screen — job only appears under Past Jobs as processing
+      setSelectedId(null);
+      setSelectedSceneId(null);
+      setDetail(null);
       await loadJobs();
-      if (json.job) setSelectedId(json.job.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Submit failed");
     } finally {
@@ -189,273 +220,410 @@ export default function Home() {
       setError(json.error || "Retry failed");
       return;
     }
+    setSelectedSceneId(null);
     await loadJobs();
     await loadDetail(id);
   }
 
+  function openJob(id: string) {
+    setSelectedId(id);
+    setSelectedSceneId(null);
+    setError(null);
+  }
+
   return (
-    <div className="relative z-10 mx-auto grid w-full max-w-6xl gap-10 px-5 pb-20 pt-10 lg:grid-cols-[280px_1fr] sm:px-8">
-      <aside className="fade-up">
-        <p className="text-sm font-medium tracking-[0.18em] text-[var(--accent)] uppercase">
+    <div className="relative z-10 mx-auto grid min-h-screen w-full max-w-7xl gap-0 lg:grid-cols-[320px_1fr]">
+      <aside className="border-b border-[var(--line)] bg-[var(--bg-elevated)]/90 px-5 py-8 backdrop-blur lg:min-h-screen lg:border-b-0 lg:border-r">
+        <p className="text-xs font-semibold tracking-[0.22em] text-[var(--blue-bright)] uppercase">
           Past jobs
         </p>
-        <div className="mt-4 space-y-2">
-          {jobs.length === 0 ? (
+        <p className="mt-2 text-sm text-[var(--ink-soft)]">
+          Grouped by day. Click a title to open scenes.
+        </p>
+
+        <div className="mt-6 space-y-4">
+          {dayGroups.length === 0 ? (
             <p className="text-sm text-[var(--ink-soft)]">No jobs yet.</p>
           ) : (
-            jobs.map((job) => (
-              <button
-                key={job.id}
-                type="button"
-                onClick={() => setSelectedId(job.id)}
-                className={`w-full border-t border-[var(--line)] px-0 py-3 text-left transition ${
-                  selectedId === job.id ? "opacity-100" : "opacity-75 hover:opacity-100"
-                }`}
-              >
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="line-clamp-2 font-medium leading-snug">
-                    {job.title || "Untitled"}
-                  </span>
-                  <span className="shrink-0 text-xs text-[var(--ink-soft)]">
-                    {statusLabel(job.status)}
-                  </span>
+            dayGroups.map((day) => {
+              const open = openDays[day.key] ?? false;
+              return (
+                <div key={day.key} className="border-t border-[var(--line)] pt-3">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setOpenDays((prev) => ({
+                        ...prev,
+                        [day.key]: !open,
+                      }))
+                    }
+                    className="flex w-full items-center justify-between gap-3 text-left"
+                  >
+                    <span className="font-[family-name:var(--font-fraunces)] text-lg text-white">
+                      {day.label}
+                    </span>
+                    <span className="rounded-full border border-[var(--line)] px-2.5 py-0.5 text-xs font-semibold text-[var(--blue-bright)]">
+                      {day.count}
+                    </span>
+                  </button>
+
+                  {open ? (
+                    <div className="mt-3 space-y-1">
+                      {day.jobs.map((job) => {
+                        const processing = isProcessing(job.status);
+                        return (
+                          <button
+                            key={job.id}
+                            type="button"
+                            onClick={() => openJob(job.id)}
+                            className={`w-full rounded-lg px-3 py-3 text-left transition ${
+                              selectedId === job.id
+                                ? "bg-[rgba(59,130,246,0.16)] ring-1 ring-[var(--blue)]"
+                                : "hover:bg-white/5"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="line-clamp-2 text-sm font-medium text-white">
+                                {job.title || "Untitled"}
+                              </span>
+                              <span
+                                className={`shrink-0 text-[11px] font-semibold tracking-wide uppercase ${
+                                  processing
+                                    ? "processing-dot text-[var(--blue-bright)]"
+                                    : job.status === "failed"
+                                      ? "text-[var(--danger)]"
+                                      : "text-[var(--ink-soft)]"
+                                }`}
+                              >
+                                {statusLabel(job.status)}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-xs text-[var(--ink-soft)]">
+                              {processing
+                                ? job.progress || "Processing in cloud…"
+                                : job.sceneCount
+                                  ? `${job.sceneCount} scenes · ${job.googleCount} Google`
+                                  : `${job.googleCount} Google packs`}
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                 </div>
-                <p className="mt-1 text-xs text-[var(--ink-soft)]">
-                  {formatWhen(job.createdAt)}
-                  {job.googleCount ? ` · ${job.googleCount} queries` : ""}
-                </p>
-              </button>
-            ))
+              );
+            })
           )}
         </div>
+
         {capacity ? (
-          <p className="mt-6 text-xs leading-relaxed text-[var(--ink-soft)]">
-            Daily Google capacity: {capacity.usedToday}/{capacity.softLimit}{" "}
-            queries used
-            {capacity.remaining === 0 ? " — limit reached" : ""}
+          <p className="mt-8 text-xs leading-relaxed text-[var(--ink-soft)]">
+            Daily Google capacity{" "}
+            <span className="text-[var(--blue-bright)]">
+              {capacity.usedToday}/{capacity.softLimit}
+            </span>
           </p>
         ) : null}
       </aside>
 
-      <main>
-        <header className="fade-up max-w-3xl">
-          <p className="text-sm font-medium tracking-[0.18em] text-[var(--accent)] uppercase">
-            Documentary Director
-          </p>
-          <h1 className="mt-3 font-[family-name:var(--font-fraunces)] text-5xl leading-[1.05] tracking-tight sm:text-6xl">
-            Script Divider
-          </h1>
-          <p className="mt-4 max-w-2xl text-lg leading-relaxed text-[var(--ink-soft)]">
-            Submit a script — it queues on Railway, runs in the background, and
-            saves Google packs + SearchAPI previews for later.
-          </p>
-        </header>
+      <main className="px-5 py-8 sm:px-8 lg:px-10">
+        {!selectedId ? (
+          <section className="fade-up mx-auto max-w-3xl">
+            <p className="text-xs font-semibold tracking-[0.22em] text-[var(--blue-bright)] uppercase">
+              Script Assembler
+            </p>
+            <h1 className="mt-3 font-[family-name:var(--font-fraunces)] text-5xl leading-[1.05] tracking-tight text-white sm:text-6xl">
+              Queue a script
+            </h1>
+            <p className="mt-4 max-w-2xl text-lg leading-relaxed text-[var(--ink-soft)]">
+              Submit once — it processes in the cloud and only appears under
+              Past Jobs while running. Open it later to browse every scene.
+            </p>
 
-        <section className="fade-up mt-10" style={{ animationDelay: "100ms" }}>
-          <label className="block text-sm font-semibold tracking-wide text-[var(--ink-soft)]">
-            Optional title
-          </label>
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="e.g. Dead Sea wolves episode"
-            className="mt-2 w-full border border-[var(--line)] bg-white/55 px-4 py-3 text-[15px] outline-none backdrop-blur focus:border-[var(--accent)]"
-          />
+            <div className="mt-10 space-y-5">
+              <div>
+                <label className="text-xs font-semibold tracking-[0.16em] text-[var(--ink-soft)] uppercase">
+                  Title
+                </label>
+                <input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Episode / video title"
+                  className="mt-2 w-full rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-4 py-3 text-[15px] text-white outline-none placeholder:text-[var(--ink-soft)]/50 focus:border-[var(--blue)]"
+                />
+              </div>
 
-          <label className="mt-5 block text-sm font-semibold tracking-wide text-[var(--ink-soft)]">
-            Script / Whisper beats
-          </label>
-          <textarea
-            value={script}
-            onChange={(e) => setScript(e.target.value)}
-            placeholder={`Paste full narration, or Whisper JSON like:\n{\n  "segments": [{ "id": 1, "text": "...", "start": 0.0, "end": 3.2 }]\n}`}
-            className="mt-2 min-h-[200px] w-full resize-y border border-[var(--line)] bg-white/55 px-4 py-3 text-[15px] leading-relaxed outline-none backdrop-blur placeholder:text-[var(--ink-soft)]/55 focus:border-[var(--accent)]"
-          />
+              <div>
+                <label className="text-xs font-semibold tracking-[0.16em] text-[var(--ink-soft)] uppercase">
+                  Script / Whisper beats
+                </label>
+                <textarea
+                  value={script}
+                  onChange={(e) => setScript(e.target.value)}
+                  placeholder="Paste full narration or Whisper JSON…"
+                  className="mt-2 min-h-[280px] w-full resize-y rounded-xl border border-[var(--line)] bg-[var(--bg-panel)] px-4 py-3 text-[15px] leading-relaxed text-white outline-none placeholder:text-[var(--ink-soft)]/50 focus:border-[var(--blue)]"
+                />
+              </div>
 
-          <div className="mt-4 flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={submitJob}
-              disabled={submitting || !script.trim()}
-              className="bg-[var(--accent)] px-5 py-3 text-sm font-semibold tracking-wide text-[#f4f7f5] transition hover:bg-[var(--accent-deep)] disabled:opacity-50"
-            >
-              {submitting ? "Queueing…" : "Queue cloud job"}
-            </button>
-            {selectedId ? (
               <button
                 type="button"
-                onClick={() => setSelectedId(null)}
-                className="border border-[var(--line)] bg-white/50 px-5 py-3 text-sm font-semibold tracking-wide transition hover:border-[var(--accent)]"
+                onClick={submitJob}
+                disabled={submitting || !script.trim()}
+                className="rounded-xl bg-[var(--blue)] px-6 py-3.5 text-sm font-semibold tracking-wide text-white transition hover:bg-[var(--blue-deep)] disabled:opacity-45"
               >
-                New job
+                {submitting ? "Submitting…" : "Submit job"}
               </button>
-            ) : null}
-          </div>
-          {error ? (
-            <p className="mt-4 text-sm font-medium text-[var(--warn)]">{error}</p>
-          ) : null}
-        </section>
 
-        {detail ? (
-          <section className="mt-12 space-y-8">
-            <div className="border-t border-[var(--line)] pt-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 className="font-[family-name:var(--font-fraunces)] text-3xl">
-                    {detail.title || "Untitled"}
-                  </h2>
-                  <p className="mt-2 text-sm text-[var(--ink-soft)]">
-                    {statusLabel(detail.status)}
-                    {detail.progress ? ` — ${detail.progress}` : ""}
-                  </p>
-                </div>
-                {detail.status === "failed" ? (
-                  <button
-                    type="button"
-                    onClick={() => retryJob(detail.id)}
-                    className="border border-[var(--line)] bg-white/50 px-4 py-2 text-sm font-semibold"
-                  >
-                    Retry
-                  </button>
-                ) : null}
-              </div>
-
-              <div className="mt-4 flex flex-wrap gap-5 text-sm text-[var(--ink-soft)]">
-                <span>
-                  <strong className="text-[var(--ink)]">{detail.beatCount}</strong>{" "}
-                  beats
-                </span>
-                <span>
-                  <strong className="text-[var(--ink)]">{detail.googleCount}</strong>{" "}
-                  Google packs
-                </span>
-                <span>
-                  <strong className="text-[var(--ink)]">{detail.aiCount}</strong> AI
-                </span>
-                {detail.model ? <span>model {detail.model}</span> : null}
-              </div>
-
-              {detail.error ? (
-                <p className="mt-4 text-sm font-medium text-[var(--warn)]">
-                  {detail.error}
-                </p>
+              {error ? (
+                <p className="text-sm font-medium text-[var(--danger)]">{error}</p>
               ) : null}
-
-              {(detail.status === "queued" || detail.status === "running") && (
-                <p className="mt-4 text-sm text-[var(--ink-soft)]">
-                  Running in the cloud — this page updates automatically.
-                </p>
-              )}
             </div>
-
-            {detail.result?.googleSearches?.length ? (
-              <div>
-                <h3 className="font-[family-name:var(--font-fraunces)] text-2xl">
-                  Google packs
-                </h3>
-                <ol className="mt-6 space-y-8">
-                  {detail.result.googleSearches
-                    .slice()
-                    .sort((a, b) => b.priority - a.priority)
-                    .map((pack) => {
-                      const preview = detail.previews?.[pack.query];
-                      return (
-                        <li
-                          key={`${pack.query}-${pack.relatedBeatIds.join(",")}`}
-                          className="border-t border-[var(--line)] pt-5"
-                        >
-                          <div className="flex flex-wrap items-baseline justify-between gap-3">
-                            <h4 className="font-[family-name:var(--font-fraunces)] text-xl">
-                              {pack.query}
-                            </h4>
-                            <span className="text-sm text-[var(--ink-soft)]">
-                              priority {pack.priority}
-                            </span>
-                          </div>
-                          <p className="mt-2 text-[var(--ink-soft)]">
-                            {pack.entityContext}
-                          </p>
-                          <p className="mt-1 text-sm text-[var(--ink-soft)]">
-                            Why Google: {pack.whyGoogle}
-                          </p>
-                          <p className="mt-3 text-sm">
-                            Beats:{" "}
-                            {pack.relatedBeatIds
-                              .map((id) => {
-                                const text = beatLookup.get(id);
-                                return text
-                                  ? `${id} (“${text.slice(0, 48)}${text.length > 48 ? "…" : ""}”)`
-                                  : id;
-                              })
-                              .join(" · ")}
-                          </p>
-
-                          {preview ? (
-                            <div className="mt-4">
-                              <p className="text-xs font-semibold tracking-wide text-[var(--ink-soft)] uppercase">
-                                Search preview · {preview.results.length} usable
-                                {preview.error ? ` · ${preview.error}` : ""}
-                              </p>
-                              {preview.results.length ? (
-                                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
-                                  {preview.results.map((hit) => (
-                                    <a
-                                      key={hit.imageUrl}
-                                      href={hit.imageUrl}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="group block overflow-hidden border border-[var(--line)] bg-black/5"
-                                    >
-                                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                                      <img
-                                        src={hit.thumbnailUrl || hit.imageUrl}
-                                        alt={hit.title}
-                                        className="aspect-video w-full object-cover transition duration-300 group-hover:scale-[1.03]"
-                                      />
-                                      <span className="block truncate px-2 py-1 text-[11px] text-[var(--ink-soft)]">
-                                        {hit.sourceDomain || hit.title}
-                                      </span>
-                                    </a>
-                                  ))}
-                                </div>
-                              ) : (
-                                <p className="mt-2 text-sm text-[var(--warn)]">
-                                  No strong horizontal hits — query may need
-                                  rewriting.
-                                </p>
-                              )}
-                            </div>
-                          ) : detail.status === "completed" ? (
-                            <p className="mt-3 text-sm text-[var(--ink-soft)]">
-                              No preview stored for this query.
-                            </p>
-                          ) : null}
-                        </li>
-                      );
-                    })}
-                </ol>
-              </div>
-            ) : null}
-
-            {detail.result?.aiGenerate?.length ? (
-              <div className="border-t border-[var(--line)] pt-8 opacity-70">
-                <h3 className="font-[family-name:var(--font-fraunces)] text-2xl">
-                  AI candidates (not building yet)
-                </h3>
-                <ul className="mt-4 space-y-3 text-sm text-[var(--ink-soft)]">
-                  {detail.result.aiGenerate.map((item) => (
-                    <li key={`${item.subject}-${item.relatedBeatIds.join(",")}`}>
-                      <strong className="text-[var(--ink)]">{item.subject}</strong>
-                      {" — "}
-                      {item.whyAiNotGoogle}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
           </section>
-        ) : null}
+        ) : (
+          <section className="fade-up">
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedId(null);
+                setSelectedSceneId(null);
+              }}
+              className="text-sm font-semibold text-[var(--blue-bright)] hover:text-white"
+            >
+              ← Back to submit
+            </button>
+
+            {detail ? (
+              <div className="mt-6">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold tracking-[0.18em] text-[var(--blue-bright)] uppercase">
+                      {statusLabel(detail.status)}
+                    </p>
+                    <h1 className="mt-2 max-w-3xl font-[family-name:var(--font-fraunces)] text-4xl tracking-tight text-white sm:text-5xl">
+                      {detail.title || "Untitled"}
+                    </h1>
+                    <p className="mt-3 text-sm text-[var(--ink-soft)]">
+                      {isProcessing(detail.status)
+                        ? detail.progress || "Processing in cloud…"
+                        : `${detail.sceneCount || scenes.length} scenes · ${detail.googleCount} Google · ${detail.aiCount} AI`}
+                      {detail.model ? ` · ${detail.model}` : ""}
+                    </p>
+                  </div>
+                  {detail.status === "failed" ? (
+                    <button
+                      type="button"
+                      onClick={() => retryJob(detail.id)}
+                      className="rounded-xl border border-[var(--line)] px-4 py-2 text-sm font-semibold text-white hover:border-[var(--blue)]"
+                    >
+                      Retry
+                    </button>
+                  ) : null}
+                </div>
+
+                {detail.error ? (
+                  <p className="mt-4 text-sm font-medium text-[var(--danger)]">
+                    {detail.error}
+                  </p>
+                ) : null}
+
+                {error ? (
+                  <p className="mt-4 text-sm font-medium text-[var(--danger)]">
+                    {error}
+                  </p>
+                ) : null}
+
+                {isProcessing(detail.status) ? (
+                  <div className="mt-10 rounded-2xl border border-[var(--line)] bg-[var(--bg-panel)] px-6 py-10">
+                    <p className="processing-dot text-sm font-semibold tracking-wide text-[var(--blue-bright)] uppercase">
+                      Processing
+                    </p>
+                    <p className="mt-3 max-w-xl text-[var(--ink-soft)]">
+                      This job is running in the cloud. Watch progress in Past
+                      Jobs — scenes will appear here when it finishes.
+                    </p>
+                  </div>
+                ) : selectedScene ? (
+                  <div className="mt-8 grid gap-6 lg:grid-cols-[220px_1fr]">
+                    <div className="max-h-[70vh] space-y-1 overflow-auto pr-1">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedSceneId(null)}
+                        className="mb-3 text-xs font-semibold tracking-wide text-[var(--blue-bright)] uppercase"
+                      >
+                        All scenes
+                      </button>
+                      {scenes.map((scene) => (
+                        <button
+                          key={scene.id}
+                          type="button"
+                          onClick={() => setSelectedSceneId(scene.id)}
+                          className={`block w-full rounded-lg px-3 py-2 text-left text-sm ${
+                            selectedSceneId === scene.id
+                              ? "bg-[rgba(59,130,246,0.18)] text-white"
+                              : "text-[var(--ink-soft)] hover:bg-white/5 hover:text-white"
+                          }`}
+                        >
+                          Scene {scene.index}
+                        </button>
+                      ))}
+                    </div>
+
+                    <article className="rounded-2xl border border-[var(--line)] bg-[var(--bg-panel)] p-6">
+                      <p className="text-xs font-semibold tracking-[0.18em] text-[var(--blue-bright)] uppercase">
+                        Scene {selectedScene.index} · {selectedScene.visualSource}
+                      </p>
+                      <h2 className="mt-3 font-[family-name:var(--font-fraunces)] text-3xl text-white">
+                        {selectedScene.query ||
+                          selectedScene.subject ||
+                          `Beat ${selectedScene.beatId}`}
+                      </h2>
+
+                      <div className="mt-6 space-y-5">
+                        <Field label="Script part">
+                          <p className="whitespace-pre-wrap leading-relaxed text-white/90">
+                            {selectedScene.scriptText}
+                          </p>
+                        </Field>
+
+                        {selectedScene.entityContext ? (
+                          <Field label="Visual context">
+                            <p className="text-white/90">
+                              {selectedScene.entityContext}
+                            </p>
+                          </Field>
+                        ) : null}
+
+                        {selectedScene.why ? (
+                          <Field label="Why this source">
+                            <p className="text-white/90">{selectedScene.why}</p>
+                          </Field>
+                        ) : null}
+
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <Field label="Image URL">
+                            <UrlOrEmpty value={selectedScene.imageUrl} />
+                          </Field>
+                          <Field label="Source URL">
+                            <UrlOrEmpty value={selectedScene.sourceUrl} />
+                          </Field>
+                          <Field label="R2 URL">
+                            <UrlOrEmpty value={selectedScene.r2Url} empty="Not uploaded yet" />
+                          </Field>
+                          <Field label="Email">
+                            <p className="text-[var(--ink-soft)]">
+                              {selectedScene.email || "—"}
+                            </p>
+                          </Field>
+                        </div>
+
+                        {selectedScene.thumbnailUrl || selectedScene.imageUrl ? (
+                          <div className="overflow-hidden rounded-xl border border-[var(--line)]">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={
+                                selectedScene.thumbnailUrl ||
+                                selectedScene.imageUrl ||
+                                ""
+                              }
+                              alt={selectedScene.query || "Scene visual"}
+                              className="aspect-video w-full object-cover"
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+                    </article>
+                  </div>
+                ) : (
+                  <div className="mt-8">
+                    <h2 className="font-[family-name:var(--font-fraunces)] text-2xl text-white">
+                      Scenes
+                    </h2>
+                    <p className="mt-2 text-sm text-[var(--ink-soft)]">
+                      Click a scene to inspect its script slice, Google/AI
+                      decision, source URL, and R2 fields.
+                    </p>
+
+                    {scenes.length === 0 ? (
+                      <p className="mt-8 text-[var(--ink-soft)]">
+                        No scenes stored for this job yet.
+                      </p>
+                    ) : (
+                      <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                        {scenes.map((scene) => (
+                          <button
+                            key={scene.id}
+                            type="button"
+                            onClick={() => setSelectedSceneId(scene.id)}
+                            className="rounded-2xl border border-[var(--line)] bg-[var(--bg-panel)] p-4 text-left transition hover:border-[var(--blue)] hover:bg-[rgba(59,130,246,0.08)]"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-semibold tracking-wide text-[var(--blue-bright)] uppercase">
+                                Scene {scene.index}
+                              </span>
+                              <span className="text-[11px] uppercase text-[var(--ink-soft)]">
+                                {scene.visualSource}
+                              </span>
+                            </div>
+                            <p className="mt-3 line-clamp-2 text-sm font-medium text-white">
+                              {scene.query ||
+                                scene.subject ||
+                                scene.scriptText.slice(0, 80)}
+                            </p>
+                            <p className="mt-2 line-clamp-2 text-xs text-[var(--ink-soft)]">
+                              {scene.scriptText}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="mt-8 text-[var(--ink-soft)]">Loading job…</p>
+            )}
+          </section>
+        )}
       </main>
     </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div>
+      <p className="text-[11px] font-semibold tracking-[0.16em] text-[var(--ink-soft)] uppercase">
+        {label}
+      </p>
+      <div className="mt-2">{children}</div>
+    </div>
+  );
+}
+
+function UrlOrEmpty({
+  value,
+  empty = "—",
+}: {
+  value?: string | null;
+  empty?: string;
+}) {
+  if (!value) {
+    return <p className="break-all text-sm text-[var(--ink-soft)]">{empty}</p>;
+  }
+  return (
+    <a
+      href={value}
+      target="_blank"
+      rel="noreferrer"
+      className="break-all text-sm text-[var(--blue-bright)] hover:text-white"
+    >
+      {value}
+    </a>
   );
 }

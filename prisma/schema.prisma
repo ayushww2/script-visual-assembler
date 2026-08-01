@@ -21,6 +21,7 @@ model Job {
   phase          String    @default("google-first")
   script         String
   beatCount      Int       @default(0)
+  sceneCount     Int       @default(0)
   googleCount    Int       @default(0)
   aiCount        Int       @default(0)
   model          String?
@@ -29,6 +30,7 @@ model Job {
   beatsJson      Json?
   resultJson     Json?
   previewsJson   Json?
+  scenesJson     Json?
   usageJson      Json?
   previewDone    Boolean   @default(false)
   createdAt      DateTime  @default(now())

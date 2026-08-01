@@ -1,18 +1,21 @@
 @import "tailwindcss";
 
 :root {
-  --bg-0: #e7ebe8;
-  --bg-1: #f2f4f1;
-  --ink: #14201a;
-  --ink-soft: #3d4a43;
-  --accent: #0f6b5c;
-  --accent-deep: #0a4f44;
-  --line: rgba(20, 32, 26, 0.12);
-  --warn: #8a5a1b;
+  --bg: #05070b;
+  --bg-elevated: #0b1018;
+  --bg-panel: #0e1520;
+  --ink: #f4f7fb;
+  --ink-soft: #9aa8bc;
+  --line: rgba(148, 163, 184, 0.16);
+  --blue: #3b82f6;
+  --blue-bright: #60a5fa;
+  --blue-deep: #1d4ed8;
+  --danger: #f87171;
+  --ok: #34d399;
 }
 
 @theme inline {
-  --color-background: var(--bg-1);
+  --color-background: var(--bg);
   --color-foreground: var(--ink);
   --font-sans: var(--font-figtree);
   --font-display: var(--font-fraunces);
@@ -32,20 +35,10 @@ body {
   color: var(--ink);
   font-family: var(--font-figtree), sans-serif;
   background:
-    radial-gradient(1100px 640px at 8% -8%, rgba(15, 107, 92, 0.14), transparent 55%),
-    radial-gradient(800px 520px at 96% 0%, rgba(20, 32, 26, 0.07), transparent 50%),
-    linear-gradient(165deg, var(--bg-0), var(--bg-1) 50%, #dde3dd);
+    radial-gradient(900px 500px at 12% -10%, rgba(59, 130, 246, 0.18), transparent 55%),
+    radial-gradient(700px 420px at 90% 0%, rgba(29, 78, 216, 0.12), transparent 50%),
+    linear-gradient(180deg, #05070b 0%, #070b12 45%, #05070b 100%);
   background-attachment: fixed;
-}
-
-body::before {
-  content: "";
-  pointer-events: none;
-  position: fixed;
-  inset: 0;
-  opacity: 0.03;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  z-index: 0;
 }
 
 a {
@@ -57,12 +50,23 @@ button,
 textarea,
 input {
   font: inherit;
+  color: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(96, 165, 250, 0.28);
+  border-radius: 999px;
 }
 
 @keyframes fadeUp {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
@@ -70,8 +74,22 @@ input {
   }
 }
 
+@keyframes pulseSoft {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 .fade-up {
-  animation: fadeUp 700ms ease both;
+  animation: fadeUp 650ms ease both;
+}
+
+.processing-dot {
+  animation: pulseSoft 1.4s ease-in-out infinite;
 }
 
 .line-clamp-2 {

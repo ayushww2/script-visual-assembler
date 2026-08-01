@@ -7,6 +7,7 @@ import {
   PREVIEW_QUERY_GAP_MS,
 } from "@/lib/jobs/limits";
 import type { GoogleSearchPreview } from "@/lib/search/google";
+import { buildScenes } from "@/lib/jobs/scenes";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -99,12 +100,20 @@ export async function processJob(jobId: string): Promise<void> {
         }
       }
 
+      const scenes = buildScenes({
+        beats: divided.beats,
+        result: divided.result,
+        previews,
+      });
+
       await prisma.job.update({
         where: { id: jobId },
         data: {
           status: "completed",
           previewDone: true,
           previewsJson: previews as unknown as Prisma.InputJsonValue,
+          scenesJson: scenes as unknown as Prisma.InputJsonValue,
+          sceneCount: scenes.length,
           progress: "Done",
           completedAt: new Date(),
         },

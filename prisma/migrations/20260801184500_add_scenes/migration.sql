@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Job" ADD COLUMN "sceneCount" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "Job" ADD COLUMN "scenesJson" JSONB;

@@ -8,6 +8,7 @@ export function toJobListItem(job: Job): JobListItem {
     status: job.status,
     phase: job.phase,
     beatCount: job.beatCount,
+    sceneCount: job.sceneCount,
     googleCount: job.googleCount,
     aiCount: job.aiCount,
     model: job.model,
@@ -27,6 +28,7 @@ export function toJobDetail(job: Job) {
     beats: job.beatsJson,
     result: job.resultJson,
     previews: job.previewsJson,
+    scenes: job.scenesJson,
     usage: job.usageJson,
   };
 }

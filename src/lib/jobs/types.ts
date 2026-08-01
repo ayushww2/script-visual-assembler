@@ -20,6 +20,7 @@ export type JobListItem = {
   status: string;
   phase: string;
   beatCount: number;
+  sceneCount: number;
   googleCount: number;
   aiCount: number;
   model: string | null;
