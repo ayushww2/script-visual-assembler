@@ -26,6 +26,13 @@ async function existingStillUrl(jobId: string, index: number): Promise<string | 
   return null;
 }
 
+function finalizeAiWhy(scene: SceneRecord, fallback: string): string {
+  if (/without empty-chair/i.test(scene.why || "")) {
+    return "AI still · chair-free documentary";
+  }
+  return scene.why || fallback;
+}
+
 function promptForScene(
   scene: SceneRecord,
   title?: string | null,
@@ -206,7 +213,7 @@ async function generateMissingAiStillsBatch(
       imageUrl: put.url,
       thumbnailUrl: put.url,
       r2Url: put.url,
-      why: scene.why || "AI documentary realism still (Batch API)",
+      why: finalizeAiWhy(scene, "AI documentary realism still (Batch API)"),
     });
     uploaded += 1;
     if (uploaded === 1 || uploaded % 10 === 0 || uploaded === needAi.length) {
@@ -321,7 +328,7 @@ async function generateMissingAiStillsRealtime(
       imageUrl: uploaded.url,
       thumbnailUrl: uploaded.url,
       r2Url: uploaded.url,
-      why: scene.why || "AI documentary realism still",
+      why: finalizeAiWhy(scene, "AI documentary realism still"),
     });
   }
 
