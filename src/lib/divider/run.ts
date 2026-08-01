@@ -8,6 +8,7 @@ import {
 } from "./schema";
 import { DIRECTOR_BATCH_CONCURRENCY } from "@/lib/jobs/limits";
 import { forceNamedEntitiesToGoogle } from "@/lib/divider/namedEntity";
+import { forceGoogleFirstSubjects } from "@/lib/divider/googleFirst";
 
 const DIRECTOR_BATCH_SIZE = 40;
 
@@ -165,7 +166,9 @@ export async function runScriptDivider(input: {
   }
 
   // Named people / places / events / films / shows → Google only
-  const enforced = forceNamedEntitiesToGoogle(beats, merged);
+  const named = forceNamedEntitiesToGoogle(beats, merged);
+  // Photographable places/objects (tombs, sites, etc.) → Google-first, not AI
+  const enforced = forceGoogleFirstSubjects(beats, named);
 
   return {
     beats,

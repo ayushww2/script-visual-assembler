@@ -189,6 +189,25 @@ const GROUP_SHOT_HINTS = [
   "gibson and rogan",
   "joe and mel",
   "mel and joe",
+  "andrew garfield",
+  "garfield",
+  "hacksaw ridge",
+  "two portraits",
+  "dual portrait",
+  "split portrait",
+];
+
+/** Other celebrities that must not appear when locked to one person. */
+const OTHER_FAMOUS = [
+  "andrew garfield",
+  "garfield",
+  "jim caviezel",
+  "caviezel",
+  "joe rogan",
+  "randall wallace",
+  "james caviezel",
+  "brachio",
+  "hacksaw ridge",
 ];
 
 function domainFromUrl(url?: string): string | undefined {
@@ -281,7 +300,19 @@ export function isBadGoogleScenePick(scene: {
     (domain.includes("imdb.com") ||
       domain.includes("media-amazon.com") ||
       domain.includes("spotify") ||
-      meta.includes("podcast") && meta.includes("rogan") && meta.includes("gibson"))
+      (meta.includes("podcast") && meta.includes("rogan") && meta.includes("gibson")))
+  ) {
+    return true;
+  }
+
+  // Wrong second person in the result (e.g. Andrew Garfield + Mel Gibson collage)
+  const sourceBlob = `${scene.sourceUrl || ""} ${scene.imageUrl || ""} ${scene.why || ""} ${scene.query || ""} ${scene.subject || ""}`;
+  if (sceneMentionsWrongExtraPerson(sourceBlob, words)) return true;
+
+  // people.com dual-celebrity features are almost always split portraits + logos
+  if (
+    domain.includes("people.com") &&
+    (/\bgibson\b/.test(words) || /\bmel gibson\b/.test(meta))
   ) {
     return true;
   }
@@ -340,16 +371,49 @@ function mentionsOtherFamousPerson(
   if (!personName) return false;
   const blob = hitBlob(hit);
   const p = personName.toLowerCase();
-  const others = ["mel gibson", "joe rogan", "jim caviezel", "randall wallace"];
+  const others = [
+    "mel gibson",
+    "joe rogan",
+    "jim caviezel",
+    "randall wallace",
+    ...OTHER_FAMOUS,
+  ];
   for (const o of others) {
     if (p.includes(o)) continue;
+    // Don't treat "gibson" fragment of Mel Gibson as other
+    if (o === "garfield" && p.includes("garfield")) continue;
     if (blob.includes(o)) return true;
   }
   // Rogan+Gibson collage when we want only Mel
   if (p.includes("mel gibson") && blob.includes("rogan") && blob.includes("gibson")) {
     return true;
   }
+  // Title/URL names a second Proper Name person (e.g. Andrew Garfield + Mel Gibson)
+  if (p.includes("mel gibson")) {
+    const title = `${hit.title || ""} ${hit.sourcePageUrl || ""}`.toLowerCase();
+    if (
+      /\bandrew[-_ ]?garfield\b/.test(title) ||
+      /\bgarfield\b/.test(title) ||
+      /\bhacksaw[-_ ]?ridge\b/.test(title)
+    ) {
+      return true;
+    }
+  }
   return false;
+}
+
+/** Scene-level: source/meta names a second person when we wanted one. */
+function sceneMentionsWrongExtraPerson(meta: string, words: string): boolean {
+  const blob = `${meta} ${words}`.toLowerCase();
+  const wantsMel =
+    /\bmel gibson\b/.test(blob) ||
+    (/\bgibson\b/.test(words) && !/\bdavid gibson\b/.test(blob));
+  if (!wantsMel) return false;
+  return (
+    /\bandrew[-_ /]?garfield\b/.test(blob) ||
+    /\bgarfield\b/.test(blob) ||
+    /\bhacksaw[-_ /]?ridge\b/.test(blob)
+  );
 }
 
 function scoreHit(

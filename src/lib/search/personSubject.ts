@@ -121,10 +121,14 @@ export function isSinglePersonBeat(text: string): boolean {
 export function personSearchNegatives(personName: string | null | undefined): string {
   const p = (personName || "").toLowerCase();
   if (p.includes("mel gibson")) {
-    return "-\"david gibson\" -\"dean gibson\" -\"hutton gibson\" -collage -split -thumbnail -logo";
+    return (
+      "-\"david gibson\" -\"dean gibson\" -\"hutton gibson\" " +
+      "-\"andrew garfield\" -garfield -\"hacksaw ridge\" " +
+      "-collage -split -\"side by side\" -thumbnail -logo -people.com"
+    );
   }
   if (p.includes("joe rogan")) {
-    return "-collage -split -thumbnail -logo -meme";
+    return "-collage -split -thumbnail -logo -meme -\"mel gibson\"";
   }
   if (p.includes("jim caviezel")) {
     return "-ai -generated -creativemarket -watermark -logo";

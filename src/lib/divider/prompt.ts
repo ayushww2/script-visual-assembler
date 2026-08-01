@@ -23,28 +23,38 @@ Do not search the exact spoken sentence.
 Search the underlying visual subject.
 
 ────────────────────────────────
-STEP B — GOOGLE vs AI
+STEP B — GOOGLE vs AI (GOOGLE-FIRST PRECEDENT)
 ────────────────────────────────
-HARD RULE (never break):
-If a beat names a REAL person, place, event, movie/film/TV/podcast title,
-organization, or other searchable proper noun → MUST be GOOGLE.
-Examples: Mel Gibson, Jesus Christ, Joe Rogan, The Passion of the Christ,
-The Resurrection of the Christ, Randall Wallace, Vatican, Jerusalem, Golgotha.
-Never assign those beats to AI. Write a tight entity-first Google query instead.
+DEFAULT: Prefer GOOGLE whenever a real photograph of the subject can exist.
+Do NOT jump to AI because a beat feels “emotional” or “hard to film”.
+Scan carefully: if Google can return a truthful documentary photo → GOOGLE.
 
-Among the REMAINING abstract / conceptual / unrecorded beats only:
-- Prefer AI for emotion, unseen spiritual battle, speculative interiors, metaphor
-- Soft target overall ~50/50 Google/AI, but NEVER move a named-real beat to AI
-  to hit the ratio. Named-real always wins over the ratio.
+HARD RULES (never break):
+1) Named REAL person / place / event / film / podcast / org → MUST be GOOGLE.
+   Examples: Mel Gibson, Jesus Christ, Joe Rogan, The Passion of the Christ,
+   The Resurrection of the Christ, Randall Wallace, Vatican, Jerusalem, Golgotha.
+2) Photographable physical subjects → MUST be GOOGLE even without a proper name:
+   tombs, rolling-stone graves, caves, churches, manuscripts, icons, frescoes,
+   maps, film sets, podcast studios, archaeological sites, Jerusalem locations.
+   Example: “sealed stone tomb” → Google “ancient rolling stone tomb jerusalem”
+   NOT AI reconstruction.
+3) NEVER invent AI photos of real named people/films/places.
 
-A) GOOGLE — authentic real-world photos:
-- named people, places, films, shows, events, news photos
-- maps, satellite, manuscripts, scientific fieldwork
+AI ONLY when ALL of these are true:
+- no named real entity in the beat, AND
+- no physical place/object a camera could document, AND
+- the beat is purely abstract (emotion, unseen spiritual claim, metaphor with
+  no concrete stand-in).
 
-B) AI GENERATE — only when no truthful real photo should exist:
-- unrecorded private moments, conceptual tension, unseen spiritual imagery
-- impossible camera views, speculative reconstructions
-- NEVER invent a fake photo of a real named person/film/place
+Soft mix target ~60% Google / ~40% AI. Google-first always wins over the ratio.
+
+A) GOOGLE — authentic real-world photos (default):
+- people, places, films, events, tombs, sites, manuscripts, news, studios
+
+B) AI GENERATE — last resort only:
+- pure abstraction with no honest real stand-in photo
+- NEVER use AI for tombs/places “because the exact biblical tomb is unknown”
+  — use a real ancient Jerusalem / rock-cut tomb photo instead
 
 ────────────────────────────────
 STEP C — GOOGLE QUERY RULES
@@ -140,8 +150,8 @@ SELECTED NICHE: ${niche.label} ${niche.version}
 ${niche.promptGuide}
 
 This batch: ${sceneCount} beats · ~${minutes.toFixed(2)} min @ ${niche.wpm} WPM
-Soft target for THIS batch: ~${targetGoogle} Google · ~${targetAi} AI —
-but named real people/places/events/movies MUST be Google even if that shifts the mix.
+Soft target for THIS batch: prefer Google (~${Math.max(targetGoogle, Math.ceil(sceneCount * 0.6))}+) · AI only when truly needed.
+Google-first: tombs/places/people/films → Google. Do not blindly assign AI.
 
 BEATS:
 ${beatBlock}
