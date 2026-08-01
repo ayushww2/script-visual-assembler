@@ -1,18 +1,16 @@
 import type { SceneRecord } from "@/lib/jobs/scenes";
 import { uploadToR2 } from "@/lib/r2";
 import { generateGptImage } from "@/lib/images/openaiImage";
-import {
-  engineerMysteryRealismPrompt,
-  fallbackMysteryImagePrompt,
-  packToImagePrompt,
-} from "@/lib/mystery/realismPrompt";
+import { fallbackMysteryImagePrompt } from "@/lib/mystery/realismPrompt";
 import { stillKey } from "@/lib/package/stills";
 
 export type AiStillProgress = (message: string) => Promise<void> | void;
 
+const AI_CONCURRENCY = 2;
+
 /**
- * For scenes without an imageUrl (typically AI / unassigned), engineer a
- * Mystery realism prompt and generate a gpt-image-2 still onto R2.
+ * Generate Mystery realism stills for scenes missing imageUrl.
+ * Uses the locked realism recipe locally (no extra ContactBox engineer call).
  */
 export async function generateMissingAiStills(input: {
   jobId: string;
@@ -24,37 +22,20 @@ export async function generateMissingAiStills(input: {
   const needAi = input.scenes.filter((s) => !s.imageUrl?.trim());
   if (!needAi.length) return input.scenes;
 
-  const byId = new Map(input.scenes.map((s) => [s.id, s]));
+  const byId = new Map(input.scenes.map((s) => [s.id, { ...s }]));
+  let done = 0;
 
-  for (let i = 0; i < needAi.length; i++) {
-    const scene = needAi[i];
-    await input.onProgress?.(
-      `AI still ${i + 1}/${needAi.length}: scene ${scene.sceneId} (${scene.subject || scene.visualSource})`,
-    );
-
+  async function runOne(scene: SceneRecord) {
     const visualIdea =
       scene.entityContext ||
       scene.subject ||
       scene.words ||
       "documentary evidence still";
 
-    let imagePrompt: string;
-    try {
-      const pack = await engineerMysteryRealismPrompt({
-        title: input.title || undefined,
-        visualIdea,
-        subject: scene.subject,
-        words: scene.words,
-        intendedUse: "evidence still",
-        preferredStyle: "color documentary",
-      });
-      imagePrompt = packToImagePrompt(pack);
-    } catch {
-      imagePrompt = fallbackMysteryImagePrompt({
-        visualIdea,
-        subject: scene.subject,
-      });
-    }
+    const imagePrompt = fallbackMysteryImagePrompt({
+      visualIdea,
+      subject: scene.subject,
+    });
 
     const image = await generateGptImage({ prompt: imagePrompt });
     const ext = image.contentType.includes("jpeg") ? "jpg" : "png";
@@ -74,6 +55,16 @@ export async function generateMissingAiStills(input: {
       r2Url: uploaded.url,
       why: scene.why || "AI documentary realism still",
     });
+
+    done += 1;
+    await input.onProgress?.(
+      `AI still ${done}/${needAi.length}: scene ${scene.sceneId}`,
+    );
+  }
+
+  for (let i = 0; i < needAi.length; i += AI_CONCURRENCY) {
+    const slice = needAi.slice(i, i + AI_CONCURRENCY);
+    await Promise.all(slice.map((s) => runOne(s)));
   }
 
   return input.scenes.map((s) => byId.get(s.id) || s);

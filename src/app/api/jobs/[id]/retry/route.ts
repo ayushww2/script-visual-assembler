@@ -5,7 +5,7 @@ import { processJob } from "@/lib/jobs/process";
 import { toJobListItem } from "@/lib/jobs/serialize";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 3600;
 
 type Params = { params: Promise<{ id: string }> };
 

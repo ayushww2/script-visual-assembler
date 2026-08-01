@@ -11,7 +11,7 @@ import {
 import { DEFAULT_NICHE, isValidNiche } from "@/lib/niches";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 3600;
 
 export async function GET() {
   try {

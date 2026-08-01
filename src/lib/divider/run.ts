@@ -1,7 +1,13 @@
 import { createContactBoxClient, getContactBoxConfig } from "@/lib/contactbox";
 import { parseBeats } from "./beats";
 import { buildDirectorUserPrompt, DIRECTOR_SYSTEM_PROMPT } from "./prompt";
-import { dividerResultSchema, type Beat, type DividerResult } from "./schema";
+import {
+  dividerResultSchema,
+  type Beat,
+  type DividerResult,
+} from "./schema";
+
+const DIRECTOR_BATCH_SIZE = 40;
 
 function extractJson(text: string): unknown {
   const trimmed = text.trim();
@@ -19,27 +25,29 @@ function extractJson(text: string): unknown {
   }
 }
 
-export async function runScriptDivider(input: {
-  script: string;
-  phase?: "google-first" | "full";
-  niche?: string | null;
-}): Promise<{
+async function runDirectorBatch(input: {
   beats: Beat[];
+  phase: "google-first" | "full";
+  niche?: string | null;
+  batchIndex: number;
+  batchCount: number;
+  totalBeats: number;
+}): Promise<{
   result: DividerResult;
-  model: string;
   usage?: { inputTokens?: number; outputTokens?: number };
+  model: string;
 }> {
-  const beats = parseBeats(input.script);
-  if (beats.length < 1) {
-    throw new Error("No beats found. Paste a script or Whisper JSON.");
-  }
-
   const { model } = getContactBoxConfig();
   const client = createContactBoxClient();
   const userPrompt = buildDirectorUserPrompt(
-    beats,
-    input.phase ?? "google-first",
+    input.beats,
+    input.phase,
     input.niche,
+    {
+      batchIndex: input.batchIndex,
+      batchCount: input.batchCount,
+      totalBeats: input.totalBeats,
+    },
   );
 
   const completion = await client.chat.completions.create({
@@ -56,23 +64,100 @@ export async function runScriptDivider(input: {
   if (!content) throw new Error("Empty model response");
 
   const parsed = dividerResultSchema.parse(extractJson(content));
-
-  // Soft-dedupe exact Google queries
-  const seen = new Set<string>();
-  parsed.googleSearches = parsed.googleSearches.filter((pack) => {
-    const key = pack.query.trim().toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-
   return {
-    beats,
     result: parsed,
     model,
     usage: {
       inputTokens: completion.usage?.prompt_tokens,
       outputTokens: completion.usage?.completion_tokens,
     },
+  };
+}
+
+export async function runScriptDivider(input: {
+  script: string;
+  phase?: "google-first" | "full";
+  niche?: string | null;
+}): Promise<{
+  beats: Beat[];
+  result: DividerResult;
+  model: string;
+  usage?: { inputTokens?: number; outputTokens?: number };
+}> {
+  const beats = parseBeats(input.script);
+  if (beats.length < 1) {
+    throw new Error("No beats found. Paste a script or Whisper JSON.");
+  }
+
+  const phase = input.phase ?? "google-first";
+  const batches: Beat[][] = [];
+  for (let i = 0; i < beats.length; i += DIRECTOR_BATCH_SIZE) {
+    batches.push(beats.slice(i, i + DIRECTOR_BATCH_SIZE));
+  }
+
+  const merged: DividerResult = { googleSearches: [], aiGenerate: [] };
+  let model = getContactBoxConfig().model;
+  let inputTokens = 0;
+  let outputTokens = 0;
+
+  for (let i = 0; i < batches.length; i++) {
+    const batch = await runDirectorBatch({
+      beats: batches[i],
+      phase,
+      niche: input.niche,
+      batchIndex: i,
+      batchCount: batches.length,
+      totalBeats: beats.length,
+    });
+    merged.googleSearches.push(...batch.result.googleSearches);
+    merged.aiGenerate.push(...batch.result.aiGenerate);
+    model = batch.model;
+    inputTokens += batch.usage?.inputTokens || 0;
+    outputTokens += batch.usage?.outputTokens || 0;
+  }
+
+  // Soft-dedupe exact Google queries but KEEP the first pack's relatedBeatIds
+  // and merge beat ids when the same query repeats across batches.
+  const byQuery = new Map<string, (typeof merged.googleSearches)[number]>();
+  for (const pack of merged.googleSearches) {
+    const key = pack.query.trim().toLowerCase();
+    const existing = byQuery.get(key);
+    if (!existing) {
+      byQuery.set(key, { ...pack, relatedBeatIds: [...pack.relatedBeatIds] });
+      continue;
+    }
+    const ids = new Set([
+      ...existing.relatedBeatIds,
+      ...pack.relatedBeatIds,
+    ]);
+    existing.relatedBeatIds = Array.from(ids);
+    if (pack.priority > existing.priority) existing.priority = pack.priority;
+  }
+  merged.googleSearches = Array.from(byQuery.values());
+
+  // Ensure every beat is covered: missing → AI placeholder
+  const covered = new Set<string>();
+  for (const pack of merged.googleSearches) {
+    for (const id of pack.relatedBeatIds) covered.add(id);
+  }
+  for (const item of merged.aiGenerate) {
+    for (const id of item.relatedBeatIds) covered.add(id);
+  }
+  for (const beat of beats) {
+    if (covered.has(beat.id)) continue;
+    merged.aiGenerate.push({
+      subject: beat.text.split(/\s+/).slice(0, 4).join(" ") || "scene",
+      visualIdea: `documentary realism evidence still for: ${beat.text}`,
+      whyAiNotGoogle: "director batch left beat uncovered",
+      relatedBeatIds: [beat.id],
+      priority: 50,
+    });
+  }
+
+  return {
+    beats,
+    result: merged,
+    model,
+    usage: { inputTokens, outputTokens },
   };
 }

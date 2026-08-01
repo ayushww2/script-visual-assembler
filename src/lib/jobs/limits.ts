@@ -1,10 +1,11 @@
 import { prisma } from "@/lib/db";
 
-/** Soft capacity target: ~30–40 Google query previews / day. */
-export const DAILY_QUERY_SOFT_LIMIT = 40;
+/** Soft capacity for Google previews / day (one image per google scene). */
+export const DAILY_QUERY_SOFT_LIMIT = 2500;
 export const MAX_CONCURRENT_JOBS = 1;
-export const PREVIEW_IMAGES_PER_QUERY = 5;
-export const PREVIEW_QUERY_GAP_MS = 350;
+/** One hit is enough for the Remotion package — saves SearchAPI quota. */
+export const PREVIEW_IMAGES_PER_QUERY = 1;
+export const PREVIEW_QUERY_GAP_MS = 200;
 
 export async function countTodaysPreviewQueries(): Promise<number> {
   const start = new Date();

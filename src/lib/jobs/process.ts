@@ -9,6 +9,7 @@ import {
 import type { GoogleSearchPreview } from "@/lib/search/google";
 import { buildScenes } from "@/lib/jobs/scenes";
 import { generateMissingAiStills } from "@/lib/jobs/aiStills";
+import { balanceGoogleAiScenes, countSources } from "@/lib/jobs/balance";
 import {
   buildAndUploadRenderPackage,
   HandoverPackagerError,
@@ -117,14 +118,20 @@ export async function processJob(jobId: string): Promise<void> {
         niche: job.niche,
       });
 
+      // Lock ~50/50 Google/AI before AI generation (excess Google → AI slots)
+      scenes = balanceGoogleAiScenes(scenes);
+      const mix = countSources(scenes);
+
       await prisma.job.update({
         where: { id: jobId },
         data: {
           previewsJson: previews as unknown as Prisma.InputJsonValue,
           scenesJson: scenes as unknown as Prisma.InputJsonValue,
           sceneCount: scenes.length,
+          googleCount: mix.google,
+          aiCount: mix.ai,
           previewDone: true,
-          progress: "Generating Mystery realism AI stills…",
+          progress: `Scenes ${scenes.length} · Google ${mix.google} · AI ${mix.ai} — generating AI stills…`,
         },
       });
 
