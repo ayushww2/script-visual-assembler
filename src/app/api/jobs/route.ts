@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/db";
 import { deriveJobTitle } from "@/lib/jobs/title";
 import { processJob, resumePendingJobs } from "@/lib/jobs/process";
@@ -14,6 +14,9 @@ export const maxDuration = 3600;
 
 export async function GET() {
   try {
+    // Watchdog: pick up any jobs left queued after a deploy/restart
+    void resumePendingJobs().catch(() => undefined);
+
     const [jobs, usedToday] = await Promise.all([
       prisma.job.findMany({
         orderBy: { createdAt: "desc" },
@@ -96,7 +99,11 @@ export async function POST(req: Request) {
     });
 
     after(async () => {
-      await processJob(job.id);
+      try {
+        await processJob(job.id);
+      } catch (err) {
+        console.error("[jobs] processJob failed", job.id, err);
+      }
     });
 
     return NextResponse.json(

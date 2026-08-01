@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Ensure instrumentation.ts register() runs on server boot (job poller).
+  experimental: {
+    instrumentationHook: true,
+  },
 };
 
 export default nextConfig;
