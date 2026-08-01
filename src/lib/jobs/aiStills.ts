@@ -7,13 +7,18 @@ import {
   packToImagePrompt,
 } from "@/lib/mystery/realismPrompt";
 import { stillKey } from "@/lib/package/stills";
-import { AI_STILL_CONCURRENCY } from "@/lib/jobs/limits";
+import {
+  AI_PROMPT_ENGINEER,
+  AI_STILL_CONCURRENCY,
+} from "@/lib/jobs/limits";
+import { mapPool } from "@/lib/jobs/pool";
 
 export type AiStillProgress = (message: string) => Promise<void> | void;
 
 /**
  * Generate Mystery realism stills for scenes missing imageUrl.
- * ContactBox engineers the prompt → gpt-image-2 renders → R2 upload.
+ * Default: local realism lock → gpt-image-2 → R2 (no per-still ContactBox).
+ * Set AI_PROMPT_ENGINEER=1 to restore ContactBox prompt engineering (slower).
  */
 export async function generateMissingAiStills(input: {
   jobId: string;
@@ -27,6 +32,7 @@ export async function generateMissingAiStills(input: {
 
   const byId = new Map(input.scenes.map((s) => [s.id, { ...s }]));
   let done = 0;
+  let lastProgressAt = 0;
 
   async function runOne(scene: SceneRecord) {
     const visualIdea =
@@ -36,17 +42,24 @@ export async function generateMissingAiStills(input: {
       "documentary evidence still";
 
     let imagePrompt: string;
-    try {
-      const pack = await engineerMysteryRealismPrompt({
-        title: input.title || undefined,
-        visualIdea,
-        subject: scene.subject,
-        words: scene.words,
-        intendedUse: "evidence still",
-        preferredStyle: "color documentary",
-      });
-      imagePrompt = packToImagePrompt(pack);
-    } catch {
+    if (AI_PROMPT_ENGINEER) {
+      try {
+        const pack = await engineerMysteryRealismPrompt({
+          title: input.title || undefined,
+          visualIdea,
+          subject: scene.subject,
+          words: scene.words,
+          intendedUse: "evidence still",
+          preferredStyle: "color documentary",
+        });
+        imagePrompt = packToImagePrompt(pack);
+      } catch {
+        imagePrompt = fallbackMysteryImagePrompt({
+          visualIdea,
+          subject: scene.subject,
+        });
+      }
+    } else {
       imagePrompt = fallbackMysteryImagePrompt({
         visualIdea,
         subject: scene.subject,
@@ -73,16 +86,24 @@ export async function generateMissingAiStills(input: {
     });
 
     done += 1;
-    await input.onProgress?.(
-      `AI still ${done}/${needAi.length}: scene ${scene.sceneId}`,
-    );
+    const now = Date.now();
+    // Throttle DB progress writes — every still at the end, else ~every 2s
+    if (
+      done === needAi.length ||
+      now - lastProgressAt >= 2_000 ||
+      done === 1
+    ) {
+      lastProgressAt = now;
+      await input.onProgress?.(
+        `AI still ${done}/${needAi.length}: scene ${scene.sceneId}`,
+      );
+    }
   }
 
   const concurrency = Math.max(1, AI_STILL_CONCURRENCY);
-  for (let i = 0; i < needAi.length; i += concurrency) {
-    const slice = needAi.slice(i, i + concurrency);
-    await Promise.all(slice.map((s) => runOne(s)));
-  }
+  await mapPool(needAi, concurrency, async (scene) => {
+    await runOne(scene);
+  });
 
   return input.scenes.map((s) => byId.get(s.id) || s);
 }

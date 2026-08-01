@@ -9,8 +9,21 @@ export const PREVIEW_IMAGES_PER_QUERY = 8;
 /** Parallel Google searches — target whole Google phase under ~1–2 min. */
 export const GOOGLE_SEARCH_CONCURRENCY = 12;
 
-/** ContactBox engineer + gpt-image-2 in parallel — target AI phase under ~8–10 min. */
-export const AI_STILL_CONCURRENCY = 8;
+/**
+ * gpt-image-2 in parallel — target full Yellowstone (~180 AI) under ~6–7 min AI phase.
+ * Override with AI_STILL_CONCURRENCY env.
+ */
+export const AI_STILL_CONCURRENCY = Math.max(
+  1,
+  Number(process.env.AI_STILL_CONCURRENCY || 16) || 16,
+);
+/**
+ * When true, each AI still calls ContactBox to engineer the prompt (~15–18s each).
+ * Default off — local Mystery realism lock is fast enough and required for <10 min jobs.
+ */
+export const AI_PROMPT_ENGINEER =
+  process.env.AI_PROMPT_ENGINEER === "1" ||
+  process.env.AI_PROMPT_ENGINEER === "true";
 /** Parallel director batches. */
 export const DIRECTOR_BATCH_CONCURRENCY = 4;
 /** Parallel R2 still packaging. */
