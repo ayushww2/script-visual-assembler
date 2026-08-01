@@ -1,0 +1,31 @@
+import type { Metadata } from "next";
+import { Figtree, Fraunces } from "next/font/google";
+import "./globals.css";
+
+const figtree = Figtree({
+  variable: "--font-figtree",
+  subsets: ["latin"],
+});
+
+const fraunces = Fraunces({
+  variable: "--font-fraunces",
+  subsets: ["latin"],
+});
+
+export const metadata: Metadata = {
+  title: "Script Visual Assembler",
+  description:
+    "Assemble documentary visuals from script — ContactBoxTools powered.",
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en" className={`${figtree.variable} ${fraunces.variable} h-full`}>
+      <body className="relative min-h-full antialiased">{children}</body>
+    </html>
+  );
+}
