@@ -1,13 +1,14 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { runScriptDivider } from "@/lib/divider/run";
-import { searchGoogleImages } from "@/lib/search/google";
+import { pickBestGoogleHit, searchGoogleImages } from "@/lib/search/google";
 import {
   GOOGLE_SEARCH_CONCURRENCY,
   PREVIEW_IMAGES_PER_QUERY,
 } from "@/lib/jobs/limits";
 import type { GoogleSearchPreview } from "@/lib/search/google";
-import { buildScenes } from "@/lib/jobs/scenes";
+import { primaryPersonFromText } from "@/lib/search/personSubject";
+import { buildScenes, type SceneRecord } from "@/lib/jobs/scenes";
 import { generateMissingAiStills } from "@/lib/jobs/aiStills";
 import { balanceGoogleAiScenes, countSources } from "@/lib/jobs/balance";
 import {
@@ -69,9 +70,22 @@ export async function processJob(jobId: string): Promise<void> {
         Array.isArray(job.scenesJson) &&
         (job.scenesJson as unknown[]).length > 0
       ) {
-        let scenes = job.scenesJson as unknown as Awaited<
-          ReturnType<typeof buildScenes>
+        let scenes = job.scenesJson as unknown as SceneRecord[];
+        const previews = (job.previewsJson || {}) as Record<
+          string,
+          GoogleSearchPreview
         >;
+        // Re-apply clean Google picker (no logo/text/watermark; 1-person lock).
+        if (Object.keys(previews).length) {
+          scenes = repickGoogleScenes(scenes, previews);
+          await prisma.job.update({
+            where: { id: jobId },
+            data: {
+              scenesJson: scenes as unknown as Prisma.InputJsonValue,
+              progress: "Re-picked clean Google stills (no logo/text/watermark)…",
+            },
+          });
+        }
         const missing = scenes.filter((s) => !s.imageUrl?.trim()).length;
 
         await prisma.job.update({
@@ -175,10 +189,16 @@ export async function processJob(jobId: string): Promise<void> {
       await mapPartsParallel(packs, googleParts, async (shard, partIndex, partCount) => {
         await mapPool(shard, googlePerPart, async (pack) => {
           try {
-            previews[pack.query] = await searchGoogleImages(
-              pack.query,
-              PREVIEW_IMAGES_PER_QUERY,
-            );
+              previews[pack.query] = await searchGoogleImages(
+                pack.query,
+                PREVIEW_IMAGES_PER_QUERY,
+                {
+                  personName: primaryPersonFromText(
+                    pack.query,
+                    pack.entityContext,
+                  ),
+                },
+              );
           } catch (err) {
             previews[pack.query] = {
               query: pack.query,
@@ -269,6 +289,50 @@ export async function processJob(jobId: string): Promise<void> {
         },
       });
     }
+  });
+}
+
+/** Re-select Google hits from saved previews with stricter clean/person rules. */
+function repickGoogleScenes(
+  scenes: SceneRecord[],
+  previews: Record<string, GoogleSearchPreview>,
+): SceneRecord[] {
+  const used = new Set<string>();
+  return scenes.map((scene) => {
+    if (scene.visualSource !== "google" || !scene.query) return scene;
+    const preview = previews[scene.query];
+    if (!preview) return scene;
+    const personName = primaryPersonFromText(
+      scene.words,
+      scene.query,
+      scene.subject,
+      scene.entityContext,
+    );
+    const hit = pickBestGoogleHit(preview, { usedUrls: used, personName });
+    if (!hit?.imageUrl) {
+      // Drop dirty Google miss → AI will fill
+      return {
+        ...scene,
+        imageUrl: null,
+        thumbnailUrl: null,
+        sourceUrl: null,
+        sourceDomain: null,
+        visualSource: "ai" as const,
+        why: scene.why || "Google pick rejected (logo/text/watermark)",
+      };
+    }
+    used.add(hit.imageUrl);
+    return {
+      ...scene,
+      imageUrl: hit.imageUrl,
+      thumbnailUrl: hit.thumbnailUrl || hit.imageUrl,
+      sourceUrl: hit.sourcePageUrl || null,
+      sourceDomain: hit.sourceDomain || null,
+      subject: personName || scene.subject,
+      why: personName
+        ? `${scene.why || "Google"} · single-person: ${personName}`
+        : scene.why,
+    };
   });
 }
 

@@ -21,6 +21,12 @@ export type GoogleSearchPreview = {
   error?: string;
 };
 
+export type PickGoogleOptions = {
+  usedUrls?: Set<string>;
+  /** When set, prefer a clean photo of THIS one person only. */
+  personName?: string | null;
+};
+
 type SearchApiImage = {
   position?: number;
   title?: string;
@@ -43,8 +49,15 @@ const WATERMARK_DOMAINS = [
   "gettyimages.",
   "premiumbeat.com",
   "motionelements.com",
+  "pond5.com",
+  "envato.com",
+  "elements.envato.com",
+  "canstockphoto.com",
+  "fotolia.com",
+  "superstock.com",
 ];
 
+/** Title/source hints that usually mean logos, text, captions, watermarks. */
 const TEXT_WATERMARK_HINTS = [
   "shutterstock",
   "getty",
@@ -55,15 +68,65 @@ const TEXT_WATERMARK_HINTS = [
   "stock photo",
   "stock image",
   "logo",
+  "logos",
+  "wordmark",
+  "brand mark",
   "caption",
   "subtitle",
+  "subtitles",
+  "closed caption",
   "meme",
   "quote",
   "typography",
   "text overlay",
+  "with text",
+  "on screen text",
+  "lower third",
   "infographic",
   "powerpoint",
   "slide",
+  "thumbnail",
+  "youtube thumbnail",
+  "clickbait",
+  "poster",
+  "movie poster",
+  "dvd cover",
+  "blu-ray",
+  "magazine cover",
+  "book cover",
+  "collage",
+  "composite",
+  "screenshot",
+  "screen grab",
+  "screengrab",
+  "title card",
+  "end card",
+  "banner",
+  "billboard text",
+  "newsletter",
+  "tweet",
+  "instagram",
+  "facebook post",
+];
+
+const GROUP_SHOT_HINTS = [
+  "cast",
+  "ensemble",
+  "group photo",
+  "group shot",
+  "family photo",
+  "crowd",
+  "panel",
+  "with friends",
+  "and wife",
+  "and husband",
+  "and daughter",
+  "and son",
+  "red carpet with",
+  "pose with",
+  "poses with",
+  "alongside",
+  "together with",
 ];
 
 function domainFromUrl(url?: string): string | undefined {
@@ -75,23 +138,69 @@ function domainFromUrl(url?: string): string | undefined {
   }
 }
 
+function hitBlob(hit: GoogleImageHit): string {
+  return `${hit.title || ""} ${hit.sourceName || ""} ${hit.sourceDomain || ""} ${hit.sourcePageUrl || ""}`.toLowerCase();
+}
+
 function hasTextOrWatermarkHints(hit: GoogleImageHit): boolean {
-  const blob = `${hit.title || ""} ${hit.sourceName || ""} ${hit.sourceDomain || ""}`.toLowerCase();
+  const blob = hitBlob(hit);
   return TEXT_WATERMARK_HINTS.some((h) => blob.includes(h));
+}
+
+function isGroupShot(hit: GoogleImageHit): boolean {
+  const blob = hitBlob(hit);
+  return GROUP_SHOT_HINTS.some((h) => blob.includes(h));
 }
 
 function isLandscape(hit: GoogleImageHit): boolean {
   if (hit.width && hit.height) return hit.width > hit.height;
-  // Unknown dims: allow but score lower; SearchAPI aspect_ratio=wide already biases
   return true;
 }
 
-function scoreHit(hit: GoogleImageHit, defaults: ReturnType<typeof getSearchDefaults>): number {
+function isCleanPhoto(hit: GoogleImageHit): boolean {
+  const domain = (hit.sourceDomain || "").toLowerCase();
+  if (WATERMARK_DOMAINS.some((d) => domain.includes(d))) return false;
+  if (hasTextOrWatermarkHints(hit)) return false;
+  if (hit.width && hit.height && hit.width <= hit.height) return false;
+  if (!isLandscape(hit)) return false;
+  return true;
+}
+
+/** Append negative keywords so Google Images returns cleaner photos. */
+export function withCleanPhotoQuery(query: string, personName?: string | null): string {
+  const base = (query || "").trim();
+  const person = (personName || "").trim();
+  const core = person
+    ? `${person} portrait photo`
+    : base;
+  // SearchAPI/Google support minus operators reasonably well for images.
+  return `${core} -logo -watermark -text -subtitle -meme -quote -poster -thumbnail -collage -screenshot`;
+}
+
+function personMatchScore(hit: GoogleImageHit, personName?: string | null): number {
+  if (!personName?.trim()) return 0;
+  const blob = hitBlob(hit);
+  const parts = personName.toLowerCase().split(/\s+/).filter((p) => p.length > 2);
+  if (!parts.length) return 0;
+  let hits = 0;
+  for (const p of parts) {
+    if (blob.includes(p)) hits += 1;
+  }
+  if (hits === parts.length) return 40;
+  if (hits > 0) return 15;
+  return -25; // title doesn't mention the person
+}
+
+function scoreHit(
+  hit: GoogleImageHit,
+  defaults: ReturnType<typeof getSearchDefaults>,
+  personName?: string | null,
+): number {
   let score = 100;
   if (hit.width && hit.height) {
     const ratio = hit.width / hit.height;
-    if (ratio < 1.2) score -= 80; // reject-ish portrait/square
-    else if (ratio >= 1.5 && ratio <= 2.1) score += 30; // ~16:9
+    if (ratio < 1.2) score -= 80;
+    else if (ratio >= 1.5 && ratio <= 2.1) score += 30;
     else if (ratio > 1.2) score += 10;
     if (hit.width >= defaults.minWidth) score += 10;
     if (hit.height >= defaults.minHeight) score += 5;
@@ -102,12 +211,19 @@ function scoreHit(hit: GoogleImageHit, defaults: ReturnType<typeof getSearchDefa
   if (hasTextOrWatermarkHints(hit)) score -= 100;
   const domain = (hit.sourceDomain || "").toLowerCase();
   if (WATERMARK_DOMAINS.some((d) => domain.includes(d))) score -= 120;
+  // YouTube thumbs often have baked-in text/logos — demote hard
+  if (domain.includes("youtube.com") || domain.includes("ytimg.com")) score -= 35;
+  if (personName) {
+    score += personMatchScore(hit, personName);
+    if (isGroupShot(hit)) score -= 50;
+  }
   return score;
 }
 
 export async function searchGoogleImages(
   query: string,
   num = 8,
+  opts?: { personName?: string | null },
 ): Promise<GoogleSearchPreview> {
   const apiKey = getSearchApiKey();
   if (!apiKey) {
@@ -115,17 +231,20 @@ export async function searchGoogleImages(
   }
 
   const defaults = getSearchDefaults();
+  const personName = opts?.personName || null;
+  const q = withCleanPhotoQuery(query, personName);
+
   const params = new URLSearchParams({
     engine: "google_images",
-    q: query,
+    q,
     api_key: apiKey,
     safe: defaults.safe,
-    aspect_ratio: "wide", // force landscape bias
+    aspect_ratio: "wide",
     size: defaults.size || "large",
     image_type: "photo",
     nfpr: "1",
     filter: "1",
-    num: String(Math.min(40, Math.max(10, num * 2))),
+    num: String(Math.min(40, Math.max(12, num * 3))),
   });
 
   const res = await fetch(`https://www.searchapi.io/api/v1/search?${params}`, {
@@ -157,19 +276,16 @@ export async function searchGoogleImages(
     .filter((r) => Boolean(r.imageUrl));
 
   const scored = mapped
-    .map((r) => ({ ...r, score: scoreHit(r, defaults) }))
+    .map((r) => ({ ...r, score: scoreHit(r, defaults, personName) }))
     .filter((r) => {
-      if (!isLandscape(r)) return false;
-      const domain = (r.sourceDomain || "").toLowerCase();
-      if (WATERMARK_DOMAINS.some((d) => domain.includes(d))) return false;
-      if (hasTextOrWatermarkHints(r)) return false;
-      if (r.width && r.height && r.width <= r.height) return false;
+      if (!isCleanPhoto(r)) return false;
+      if (personName && isGroupShot(r)) return false;
       return (r.score || 0) >= 40;
     })
     .sort((a, b) => (b.score || 0) - (a.score || 0));
 
   let results = scored;
-  // Soft backfill only landscape non-stock if filter too aggressive
+  // Soft backfill: landscape + non-stock only (still no watermark domains)
   if (results.length < 1) {
     results = mapped
       .filter((r) => isLandscape(r))
@@ -177,36 +293,70 @@ export async function searchGoogleImages(
         const domain = (r.sourceDomain || "").toLowerCase();
         return !WATERMARK_DOMAINS.some((d) => domain.includes(d));
       })
-      .map((r) => ({ ...r, score: scoreHit(r, defaults) }))
+      .filter((r) => !hasTextOrWatermarkHints(r))
+      .map((r) => ({ ...r, score: scoreHit(r, defaults, personName) }))
       .sort((a, b) => (b.score || 0) - (a.score || 0));
   }
 
   return {
-    query,
+    query: q,
     provider: "searchapi_google_images",
     results: results.slice(0, num),
     filteredOut: Math.max(0, mapped.length - results.length),
   };
 }
 
-/** Pick one landscape / clean hit, skipping already-used image URLs. */
+/** Pick one clean landscape hit, optionally locked to one person. */
 export function pickBestGoogleHit(
   preview: GoogleSearchPreview | undefined,
-  usedUrls?: Set<string>,
+  usedUrlsOrOpts?: Set<string> | PickGoogleOptions,
+  maybeOpts?: PickGoogleOptions,
 ): GoogleImageHit | null {
+  // Back-compat: pickBestGoogleHit(preview, usedUrls)
+  let usedUrls: Set<string> | undefined;
+  let personName: string | null | undefined;
+  if (usedUrlsOrOpts instanceof Set) {
+    usedUrls = usedUrlsOrOpts;
+    personName = maybeOpts?.personName;
+  } else if (usedUrlsOrOpts) {
+    usedUrls = usedUrlsOrOpts.usedUrls;
+    personName = usedUrlsOrOpts.personName;
+  }
+
   if (!preview?.results?.length) return null;
+
+  const ranked = preview.results
+    .slice()
+    .map((hit) => ({
+      hit,
+      score:
+        (hit.score || 0) +
+        personMatchScore(hit, personName) +
+        (personName && isGroupShot(hit) ? -50 : 0),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  for (const { hit } of ranked) {
+    if (usedUrls?.has(hit.imageUrl)) continue;
+    if (!isCleanPhoto(hit)) continue;
+    if (personName && isGroupShot(hit)) continue;
+    if (personName && personMatchScore(hit, personName) < 0) continue;
+    return hit;
+  }
+
+  // Relax person title match, still clean + not group
+  for (const { hit } of ranked) {
+    if (usedUrls?.has(hit.imageUrl)) continue;
+    if (!isCleanPhoto(hit)) continue;
+    if (personName && isGroupShot(hit)) continue;
+    return hit;
+  }
+
+  // Last resort: unused only (should be rare)
   for (const hit of preview.results) {
     if (usedUrls?.has(hit.imageUrl)) continue;
-    if (!isLandscape(hit)) continue;
     if (hasTextOrWatermarkHints(hit)) continue;
-    const domain = (hit.sourceDomain || "").toLowerCase();
-    if (WATERMARK_DOMAINS.some((d) => domain.includes(d))) continue;
     return hit;
   }
-  // last resort: first unused
-  for (const hit of preview.results) {
-    if (usedUrls?.has(hit.imageUrl)) continue;
-    return hit;
-  }
-  return preview.results[0] || null;
+  return null;
 }

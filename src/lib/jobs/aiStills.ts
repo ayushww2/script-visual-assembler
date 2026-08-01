@@ -204,8 +204,34 @@ async function generateMissingAiStillsRealtime(
   const perPart = Math.max(1, Math.ceil(totalConcurrency / parts));
 
   async function runOne(scene: SceneRecord) {
-    const imagePrompt = await promptForSceneRealtime(scene, input.title);
-    const image = await generateGptImage({ prompt: imagePrompt });
+    let imagePrompt = await promptForSceneRealtime(scene, input.title);
+    let image;
+    try {
+      image = await generateGptImage({ prompt: imagePrompt });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Safety rejects (e.g. religious/sexual classifiers) → safer documentary rewrite once
+      if (/safety|rejected|sexual|violence/i.test(msg)) {
+        imagePrompt = composeMysteryImagePrompt({
+          visualIdea:
+            "overcast documentary landscape still, empty ancient stone path, no people, no nudity, no gore",
+          subject: "documentary landscape",
+          title: input.title || undefined,
+          words: (scene.words || "").slice(0, 80),
+        });
+        try {
+          image = await generateGptImage({ prompt: imagePrompt });
+        } catch {
+          console.warn("[aiStills] skip scene after safety reject", scene.sceneId, msg);
+          return; // leave missing; package may still proceed with partial if others ok
+        }
+      } else if (/rate limit|429/i.test(msg)) {
+        throw err; // let outer retry/backoff in generateGptImage; rethrow if exhausted
+      } else {
+        console.warn("[aiStills] scene failed", scene.sceneId, msg);
+        return;
+      }
+    }
     const ext = image.contentType.includes("jpeg") ? "jpg" : "png";
     const key = stillKey(input.jobId, scene.index, ext);
     const uploaded = await uploadToR2({

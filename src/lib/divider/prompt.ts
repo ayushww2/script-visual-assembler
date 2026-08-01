@@ -54,9 +54,13 @@ STEP C — GOOGLE QUERY RULES
 - Prefer ONE google pack PER google beat (relatedBeatIds length 1)
 - Only share a pack across 2 beats when they are the exact same visual subject
 - No duplicate exact queries in this batch
+- If the beat is about ONE real person, the query MUST name that person
+  (e.g. "mel gibson", "joe rogan", "jesus christ") — never a vague theme.
+  Prefer a single-subject photo intent (portrait / interview still), not cast/group.
+- Never aim for posters, thumbnails, memes, quote cards, logos, or text overlays.
 
-Good: yellowstone wolves release | junction butte pack | wolf hunting montana
-Bad: something was moving beneath the dead landscape
+Good: mel gibson interview | joe rogan podcast | passion of the christ set
+Bad: something was moving beneath the dead landscape | raising eyebrows meme
 
 ────────────────────────────────
 STEP D — AI STILL RULES

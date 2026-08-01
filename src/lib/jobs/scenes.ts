@@ -3,6 +3,7 @@ import {
   pickBestGoogleHit,
   type GoogleSearchPreview,
 } from "@/lib/search/google";
+import { primaryPersonFromText } from "@/lib/search/personSubject";
 import { countWords, getNiche } from "@/lib/niches";
 import { timeChunksAtWpm } from "@/lib/package/timing";
 
@@ -101,8 +102,19 @@ export function buildScenes(input: {
     const google = googleByBeat.get(beat.id);
     const ai = aiByBeat.get(beat.id);
     const preview = google ? input.previews?.[google.query] : undefined;
-    // Exactly one clean landscape still per Google scene (no shared duplicate URL)
-    const hit = google ? pickBestGoogleHit(preview, usedGoogleUrls) : null;
+    const personName = primaryPersonFromText(
+      beat.text,
+      google?.query,
+      google?.entityContext,
+    );
+    // Exactly one clean landscape still per Google scene (no logo/text/watermark;
+    // if the beat is about one person, lock the pick to that person).
+    const hit = google
+      ? pickBestGoogleHit(preview, {
+          usedUrls: usedGoogleUrls,
+          personName,
+        })
+      : null;
     if (hit?.imageUrl) usedGoogleUrls.add(hit.imageUrl);
     const sceneId = String(i + 1);
     const words = beat.text;
@@ -134,9 +146,11 @@ export function buildScenes(input: {
         ...base,
         visualSource: "google" as const,
         query: google.query,
-        subject: google.entityContext,
+        subject: personName || google.entityContext,
         entityContext: google.entityContext,
-        why: google.whyGoogle,
+        why: personName
+          ? `${google.whyGoogle} · single-person: ${personName}`
+          : google.whyGoogle,
         priority: google.priority,
         imageUrl: hit?.imageUrl ?? null,
         thumbnailUrl: hit?.thumbnailUrl ?? hit?.imageUrl ?? null,
