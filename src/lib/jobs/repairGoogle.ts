@@ -52,14 +52,19 @@ export async function repairBadGoogleScenes(input: {
       scene.subject,
       scene.entityContext,
     );
-    const query =
-      (personName
-        ? `${personName}`
-        : scene.query || scene.subject || scene.words.split(/\s+/).slice(0, 4).join(" ")
-      ).trim() || "documentary photo";
+    // Always search the full locked person name — never bare "Gibson".
+    const query = (
+      personName
+        ? personName
+        : scene.query ||
+          scene.subject ||
+          scene.words.split(/\s+/).slice(0, 4).join(" ")
+    )
+      .replace(/\bgibson\b/gi, "Mel Gibson")
+      .trim() || "documentary photo";
 
     try {
-      const preview = await searchGoogleImages(query, 12, { personName });
+      const preview = await searchGoogleImages(query, 16, { personName });
       const hit = pickBestGoogleHit(preview, {
         usedUrls: used,
         personName,

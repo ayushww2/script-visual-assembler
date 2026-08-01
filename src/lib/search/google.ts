@@ -1,4 +1,5 @@
 import { getSearchApiKey, getSearchDefaults } from "@/lib/env";
+import { personSearchNegatives } from "@/lib/search/personSubject";
 
 export type GoogleImageHit = {
   title: string;
@@ -55,9 +56,14 @@ const WATERMARK_DOMAINS = [
   "canstockphoto.com",
   "fotolia.com",
   "superstock.com",
+  "creativemarket.com",
+  "tint.creativemarket.com",
+  "watermark.creativemarket",
+  "stocksy.com",
+  "offset.com",
 ];
 
-/** Thumbs/social posts almost always have logos, text, or watermarks baked in. */
+/** Thumbs/social/episode-art often have logos, text, or wrong guests. */
 const BLOCKED_MEDIA_DOMAINS = [
   "youtube.com",
   "youtu.be",
@@ -77,14 +83,30 @@ const BLOCKED_MEDIA_DOMAINS = [
   "redd.it",
   "imgur.com",
   "tumblr.com",
+  "spotifycdn.com",
+  "scdn.co",
+  "i.scdn.co",
+  "mosaic.scdn",
 ];
 
-/** Title/source hints that usually mean logos, text, captions, watermarks. */
+const WATERMARK_URL_HINTS = [
+  "watermark",
+  "wm=1",
+  "preset:cm_watermark",
+  "cm_watermark",
+  "/watermark",
+  "mark=1",
+  "comp.jpg",
+  "preview_watermark",
+];
+
 const TEXT_WATERMARK_HINTS = [
   "shutterstock",
   "getty",
   "alamy",
   "dreamstime",
+  "creativemarket",
+  "creative market",
   "watermark",
   "royalty free",
   "stock photo",
@@ -118,6 +140,10 @@ const TEXT_WATERMARK_HINTS = [
   "book cover",
   "collage",
   "composite",
+  "side by side",
+  "side-by-side",
+  "split image",
+  "split-screen",
   "screenshot",
   "screen grab",
   "screengrab",
@@ -129,6 +155,10 @@ const TEXT_WATERMARK_HINTS = [
   "tweet",
   "instagram",
   "facebook post",
+  "ai generated",
+  "ai-generated",
+  "midjourney",
+  "generate ai",
 ];
 
 const GROUP_SHOT_HINTS = [
@@ -149,6 +179,16 @@ const GROUP_SHOT_HINTS = [
   "poses with",
   "alongside",
   "together with",
+  "featuring",
+  "ft.",
+  " vs ",
+  " vs. ",
+  " and mel ",
+  " and joe ",
+  "rogan and gibson",
+  "gibson and rogan",
+  "joe and mel",
+  "mel and joe",
 ];
 
 function domainFromUrl(url?: string): string | undefined {
@@ -161,12 +201,17 @@ function domainFromUrl(url?: string): string | undefined {
 }
 
 function hitBlob(hit: GoogleImageHit): string {
-  return `${hit.title || ""} ${hit.sourceName || ""} ${hit.sourceDomain || ""} ${hit.sourcePageUrl || ""}`.toLowerCase();
+  return `${hit.title || ""} ${hit.sourceName || ""} ${hit.sourceDomain || ""} ${hit.sourcePageUrl || ""} ${hit.imageUrl || ""}`.toLowerCase();
 }
 
 function hasTextOrWatermarkHints(hit: GoogleImageHit): boolean {
   const blob = hitBlob(hit);
   return TEXT_WATERMARK_HINTS.some((h) => blob.includes(h));
+}
+
+function hasWatermarkInUrl(url?: string | null): boolean {
+  const u = (url || "").toLowerCase();
+  return WATERMARK_URL_HINTS.some((h) => u.includes(h));
 }
 
 function isGroupShot(hit: GoogleImageHit): boolean {
@@ -192,6 +237,7 @@ function isCleanPhoto(hit: GoogleImageHit): boolean {
   const domain = (hit.sourceDomain || "").toLowerCase();
   const url = (hit.imageUrl || "").toLowerCase();
   if (isBlockedMediaDomain(domain) || isBlockedMediaDomain(url)) return false;
+  if (hasWatermarkInUrl(url) || hasWatermarkInUrl(hit.sourcePageUrl)) return false;
   if (hasTextOrWatermarkHints(hit)) return false;
   if (hit.width && hit.height && hit.width <= hit.height) return false;
   if (!isLandscape(hit)) return false;
@@ -203,36 +249,107 @@ export function isBadGoogleScenePick(scene: {
   visualSource?: string;
   imageUrl?: string | null;
   sourceDomain?: string | null;
+  sourceUrl?: string | null;
+  query?: string | null;
+  subject?: string | null;
+  words?: string | null;
+  why?: string | null;
 }): boolean {
   if (scene.visualSource !== "google" || !scene.imageUrl?.trim()) return false;
   if (isBlockedMediaDomain(scene.sourceDomain || undefined)) return true;
   if (isBlockedMediaDomain(scene.imageUrl)) return true;
+  if (hasWatermarkInUrl(scene.imageUrl) || hasWatermarkInUrl(scene.sourceUrl)) {
+    return true;
+  }
+  const domain = (scene.sourceDomain || "").toLowerCase();
+  const url = (scene.imageUrl || "").toLowerCase();
+  const meta = `${scene.query || ""} ${scene.subject || ""} ${scene.why || ""}`.toLowerCase();
+  const words = (scene.words || "").toLowerCase();
+
+  if (meta.includes("creativemarket") || url.includes("creativemarket")) return true;
+  if (meta.includes("watermark") || url.includes("watermark")) return true;
+
+  // Bare "Gibson" query (not Mel Gibson) → wrong people
+  if (/\bgibson\b/.test(meta) && !/\bmel gibson\b/.test(meta)) return true;
+
+  // Dual-person beats on news/thumb hosts are usually Rogan|Gibson collages with logos
+  const dual =
+    (/\brogan\b/.test(words) || /\brogan\b/.test(meta)) &&
+    (/\bgibson\b/.test(words) || /\bgibson\b/.test(meta));
+  if (
+    dual &&
+    (domain.includes("imdb.com") ||
+      domain.includes("media-amazon.com") ||
+      domain.includes("spotify") ||
+      meta.includes("podcast") && meta.includes("rogan") && meta.includes("gibson"))
+  ) {
+    return true;
+  }
+
   return false;
 }
 
 /** Append negative keywords so Google Images returns cleaner photos. */
-export function withCleanPhotoQuery(query: string, personName?: string | null): string {
-  const base = (query || "").trim();
+export function withCleanPhotoQuery(
+  query: string,
+  personName?: string | null,
+): string {
   const person = (personName || "").trim();
-  const core = person
-    ? `${person} portrait photo`
-    : base;
-  // SearchAPI/Google support minus operators reasonably well for images.
-  return `${core} -logo -watermark -text -subtitle -meme -quote -poster -thumbnail -collage -screenshot`;
+  const base = (query || "").trim();
+  // Always search the full person name when locked — never bare surname.
+  const core = person ? `"${person}" portrait photo` : base;
+  const personNeg = personSearchNegatives(person);
+  return `${core} -logo -watermark -text -subtitle -meme -quote -poster -thumbnail -collage -screenshot -composite -creativemarket ${personNeg}`.replace(
+    /\s+/g,
+    " ",
+  ).trim();
 }
 
+/**
+ * Require ALL name tokens (Mel + Gibson). Partial "gibson" alone scores as reject.
+ */
 function personMatchScore(hit: GoogleImageHit, personName?: string | null): number {
   if (!personName?.trim()) return 0;
   const blob = hitBlob(hit);
-  const parts = personName.toLowerCase().split(/\s+/).filter((p) => p.length > 2);
+  const parts = personName
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((p) => p.length > 2);
   if (!parts.length) return 0;
+
   let hits = 0;
   for (const p of parts) {
     if (blob.includes(p)) hits += 1;
   }
+
+  // Multi-word names: require every token (Mel AND Gibson)
+  if (parts.length >= 2) {
+    if (hits === parts.length) return 50;
+    // "gibson" without "mel" is a hard reject for Mel Gibson
+    return -80;
+  }
+
   if (hits === parts.length) return 40;
-  if (hits > 0) return 15;
-  return -25; // title doesn't mention the person
+  return -25;
+}
+
+function mentionsOtherFamousPerson(
+  hit: GoogleImageHit,
+  personName?: string | null,
+): boolean {
+  if (!personName) return false;
+  const blob = hitBlob(hit);
+  const p = personName.toLowerCase();
+  const others = ["mel gibson", "joe rogan", "jim caviezel", "randall wallace"];
+  for (const o of others) {
+    if (p.includes(o)) continue;
+    if (blob.includes(o)) return true;
+  }
+  // Rogan+Gibson collage when we want only Mel
+  if (p.includes("mel gibson") && blob.includes("rogan") && blob.includes("gibson")) {
+    return true;
+  }
+  return false;
 }
 
 function scoreHit(
@@ -253,13 +370,15 @@ function scoreHit(
     score -= 15;
   }
   if (hasTextOrWatermarkHints(hit)) score -= 100;
+  if (hasWatermarkInUrl(hit.imageUrl)) score -= 200;
   const domain = (hit.sourceDomain || "").toLowerCase();
   if (isBlockedMediaDomain(domain) || isBlockedMediaDomain(hit.imageUrl)) {
     score -= 200;
   }
   if (personName) {
     score += personMatchScore(hit, personName);
-    if (isGroupShot(hit)) score -= 50;
+    if (isGroupShot(hit)) score -= 60;
+    if (mentionsOtherFamousPerson(hit, personName)) score -= 70;
   }
   return score;
 }
@@ -324,16 +443,18 @@ export async function searchGoogleImages(
     .filter((r) => {
       if (!isCleanPhoto(r)) return false;
       if (personName && isGroupShot(r)) return false;
+      if (personName && personMatchScore(r, personName) < 0) return false;
+      if (personName && mentionsOtherFamousPerson(r, personName)) return false;
       return (r.score || 0) >= 40;
     })
     .sort((a, b) => (b.score || 0) - (a.score || 0));
 
   let results = scored;
-  // Soft backfill: landscape + clean domains only (never social/stock thumbs)
   if (results.length < 1) {
     results = mapped
       .filter((r) => isLandscape(r))
       .filter((r) => isCleanPhoto(r))
+      .filter((r) => !personName || personMatchScore(r, personName) >= 40)
       .map((r) => ({ ...r, score: scoreHit(r, defaults, personName) }))
       .sort((a, b) => (b.score || 0) - (a.score || 0));
   }
@@ -352,7 +473,6 @@ export function pickBestGoogleHit(
   usedUrlsOrOpts?: Set<string> | PickGoogleOptions,
   maybeOpts?: PickGoogleOptions,
 ): GoogleImageHit | null {
-  // Back-compat: pickBestGoogleHit(preview, usedUrls)
   let usedUrls: Set<string> | undefined;
   let personName: string | null | undefined;
   if (usedUrlsOrOpts instanceof Set) {
@@ -372,31 +492,29 @@ export function pickBestGoogleHit(
       score:
         (hit.score || 0) +
         personMatchScore(hit, personName) +
-        (personName && isGroupShot(hit) ? -50 : 0),
+        (personName && isGroupShot(hit) ? -60 : 0) +
+        (personName && mentionsOtherFamousPerson(hit, personName) ? -70 : 0),
     }))
     .sort((a, b) => b.score - a.score);
 
+  // Strict: clean + full name match + not group/composite
   for (const { hit } of ranked) {
     if (usedUrls?.has(hit.imageUrl)) continue;
     if (!isCleanPhoto(hit)) continue;
     if (personName && isGroupShot(hit)) continue;
-    if (personName && personMatchScore(hit, personName) < 0) continue;
+    if (personName && mentionsOtherFamousPerson(hit, personName)) continue;
+    if (personName && personMatchScore(hit, personName) < 40) continue;
     return hit;
   }
 
-  // Relax person title match, still clean + not group
+  // Slightly relax: still require full name if person locked
   for (const { hit } of ranked) {
     if (usedUrls?.has(hit.imageUrl)) continue;
     if (!isCleanPhoto(hit)) continue;
     if (personName && isGroupShot(hit)) continue;
+    if (personName && personMatchScore(hit, personName) < 40) continue;
     return hit;
   }
 
-  // Last resort: unused only (should be rare)
-  for (const hit of preview.results) {
-    if (usedUrls?.has(hit.imageUrl)) continue;
-    if (hasTextOrWatermarkHints(hit)) continue;
-    return hit;
-  }
   return null;
 }
