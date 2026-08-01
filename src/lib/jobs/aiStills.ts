@@ -1,16 +1,19 @@
 import type { SceneRecord } from "@/lib/jobs/scenes";
 import { uploadToR2 } from "@/lib/r2";
 import { generateGptImage } from "@/lib/images/openaiImage";
-import { fallbackMysteryImagePrompt } from "@/lib/mystery/realismPrompt";
+import {
+  engineerMysteryRealismPrompt,
+  fallbackMysteryImagePrompt,
+  packToImagePrompt,
+} from "@/lib/mystery/realismPrompt";
 import { stillKey } from "@/lib/package/stills";
+import { AI_STILL_CONCURRENCY } from "@/lib/jobs/limits";
 
 export type AiStillProgress = (message: string) => Promise<void> | void;
 
-const AI_CONCURRENCY = 2;
-
 /**
  * Generate Mystery realism stills for scenes missing imageUrl.
- * Uses the locked realism recipe locally (no extra ContactBox engineer call).
+ * ContactBox engineers the prompt → gpt-image-2 renders → R2 upload.
  */
 export async function generateMissingAiStills(input: {
   jobId: string;
@@ -32,10 +35,23 @@ export async function generateMissingAiStills(input: {
       scene.words ||
       "documentary evidence still";
 
-    const imagePrompt = fallbackMysteryImagePrompt({
-      visualIdea,
-      subject: scene.subject,
-    });
+    let imagePrompt: string;
+    try {
+      const pack = await engineerMysteryRealismPrompt({
+        title: input.title || undefined,
+        visualIdea,
+        subject: scene.subject,
+        words: scene.words,
+        intendedUse: "evidence still",
+        preferredStyle: "color documentary",
+      });
+      imagePrompt = packToImagePrompt(pack);
+    } catch {
+      imagePrompt = fallbackMysteryImagePrompt({
+        visualIdea,
+        subject: scene.subject,
+      });
+    }
 
     const image = await generateGptImage({ prompt: imagePrompt });
     const ext = image.contentType.includes("jpeg") ? "jpg" : "png";
@@ -62,8 +78,9 @@ export async function generateMissingAiStills(input: {
     );
   }
 
-  for (let i = 0; i < needAi.length; i += AI_CONCURRENCY) {
-    const slice = needAi.slice(i, i + AI_CONCURRENCY);
+  const concurrency = Math.max(1, AI_STILL_CONCURRENCY);
+  for (let i = 0; i < needAi.length; i += concurrency) {
+    const slice = needAi.slice(i, i + concurrency);
     await Promise.all(slice.map((s) => runOne(s)));
   }
 

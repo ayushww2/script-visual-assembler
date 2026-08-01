@@ -1,5 +1,6 @@
 import type { SceneRecord } from "@/lib/jobs/scenes";
-import { uploadToR2 } from "@/lib/r2";
+import { PACKAGE_STILL_CONCURRENCY } from "@/lib/jobs/limits";
+import { getR2Config, uploadToR2 } from "@/lib/r2";
 import {
   DEFAULT_PACKAGE_WPM,
   type RenderPackage,
@@ -41,6 +42,15 @@ export class HandoverPackagerError extends Error {
   }
 }
 
+function alreadyOnOurR2(url: string): boolean {
+  try {
+    const base = getR2Config().publicBaseUrl;
+    return Boolean(base && url.startsWith(base));
+  } catch {
+    return false;
+  }
+}
+
 export async function buildAndUploadRenderPackage(
   input: HandoverInput,
 ): Promise<HandoverResult> {
@@ -67,13 +77,24 @@ export async function buildAndUploadRenderPackage(
   );
 
   const r2BySceneId = new Map<string, string>();
-  const updatedScenes: SceneRecord[] = [];
+  const updatedById = new Map<string, SceneRecord>();
+  const concurrency = Math.max(1, PACKAGE_STILL_CONCURRENCY);
+  let done = 0;
 
-  for (let i = 0; i < scenes.length; i++) {
-    const scene = scenes[i];
-    await input.onProgress?.(
-      `Packaging still ${i + 1}/${scenes.length}: scene ${scene.sceneId}`,
-    );
+  async function packageOne(scene: SceneRecord) {
+    // AI stills are already on our R2 — skip re-download/re-upload
+    if (scene.imageUrl && alreadyOnOurR2(scene.imageUrl)) {
+      r2BySceneId.set(scene.sceneId, scene.imageUrl);
+      updatedById.set(scene.id, {
+        ...scene,
+        r2Url: scene.imageUrl,
+        imageUrl: scene.imageUrl,
+        thumbnailUrl: scene.imageUrl,
+      });
+      done += 1;
+      return;
+    }
+
     const uploaded = await downloadAndUploadStill({
       jobId: input.jobId,
       sceneId: scene.sceneId,
@@ -86,14 +107,26 @@ export async function buildAndUploadRenderPackage(
       referer: scene.sourceUrl,
     });
     r2BySceneId.set(scene.sceneId, uploaded.url);
-    updatedScenes.push({
+    updatedById.set(scene.id, {
       ...scene,
       r2Url: uploaded.url,
       imageUrl: uploaded.url,
       thumbnailUrl: uploaded.url,
     });
+    done += 1;
   }
 
+  for (let i = 0; i < scenes.length; i += concurrency) {
+    const slice = scenes.slice(i, i + concurrency);
+    await Promise.all(slice.map((s) => packageOne(s)));
+    await input.onProgress?.(
+      `Packaging stills ${Math.min(done, scenes.length)}/${scenes.length}…`,
+    );
+  }
+
+  const updatedScenes = scenes.map((s) => updatedById.get(s.id) || s);
+
+  // Exact duration from words @ niche WPM (Mystery = 160)
   const timed = timeChunksAtWpm(
     updatedScenes.map((s) => s.words),
     wpm,
@@ -132,8 +165,9 @@ export async function buildAndUploadRenderPackage(
   };
 
   await input.onProgress?.("Packaging: validating render package…");
+  // Skip expensive public HEAD checks for our own R2 URLs (trust upload)
   const issues = await validateRenderPackage(pkg, {
-    checkImageReachability: true,
+    checkImageReachability: false,
   });
   if (issues.length) {
     throw new HandoverPackagerError(

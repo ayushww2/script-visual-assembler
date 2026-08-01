@@ -3,8 +3,8 @@ import { prisma } from "@/lib/db";
 import { runScriptDivider } from "@/lib/divider/run";
 import { searchGoogleImages } from "@/lib/search/google";
 import {
+  GOOGLE_SEARCH_CONCURRENCY,
   PREVIEW_IMAGES_PER_QUERY,
-  PREVIEW_QUERY_GAP_MS,
 } from "@/lib/jobs/limits";
 import type { GoogleSearchPreview } from "@/lib/search/google";
 import { buildScenes } from "@/lib/jobs/scenes";
@@ -15,8 +15,6 @@ import {
   HandoverPackagerError,
 } from "@/lib/package/handover";
 import { getNiche } from "@/lib/niches";
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** In-process lock so one Node instance only runs one heavy job at a time. */
 let processing = false;
@@ -82,33 +80,34 @@ export async function processJob(jobId: string): Promise<void> {
         .slice()
         .sort((a, b) => b.priority - a.priority);
 
-      for (let i = 0; i < packs.length; i++) {
-        const pack = packs[i];
+      // Parallel Google — one best landscape/no-watermark still chosen later per scene
+      const concurrency = Math.max(1, GOOGLE_SEARCH_CONCURRENCY);
+      for (let i = 0; i < packs.length; i += concurrency) {
+        const slice = packs.slice(i, i + concurrency);
         await prisma.job.update({
           where: { id: jobId },
           data: {
-            progress: `Google preview ${i + 1}/${packs.length}: ${pack.query}`,
+            progress: `Google previews ${Math.min(i + slice.length, packs.length)}/${packs.length} (×${concurrency})…`,
           },
         });
-
-        try {
-          previews[pack.query] = await searchGoogleImages(
-            pack.query,
-            PREVIEW_IMAGES_PER_QUERY,
-          );
-        } catch (err) {
-          previews[pack.query] = {
-            query: pack.query,
-            provider: "searchapi_google_images",
-            results: [],
-            filteredOut: 0,
-            error: err instanceof Error ? err.message : "Search failed",
-          };
-        }
-
-        if (i < packs.length - 1) {
-          await sleep(PREVIEW_QUERY_GAP_MS);
-        }
+        await Promise.all(
+          slice.map(async (pack) => {
+            try {
+              previews[pack.query] = await searchGoogleImages(
+                pack.query,
+                PREVIEW_IMAGES_PER_QUERY,
+              );
+            } catch (err) {
+              previews[pack.query] = {
+                query: pack.query,
+                provider: "searchapi_google_images",
+                results: [],
+                filteredOut: 0,
+                error: err instanceof Error ? err.message : "Search failed",
+              };
+            }
+          }),
+        );
       }
 
       let scenes = buildScenes({

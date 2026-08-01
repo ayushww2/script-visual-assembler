@@ -1,5 +1,8 @@
 import type { Beat, DividerResult } from "@/lib/divider/schema";
-import type { GoogleSearchPreview } from "@/lib/search/google";
+import {
+  pickBestGoogleHit,
+  type GoogleSearchPreview,
+} from "@/lib/search/google";
 import {
   countWords,
   durationSecFromWords,
@@ -89,24 +92,24 @@ export function buildScenes(input: {
   }
 
   let cursorSec = 0;
+  const usedGoogleUrls = new Set<string>();
 
   return input.beats.map((beat, i) => {
     const google = googleByBeat.get(beat.id);
     const ai = aiByBeat.get(beat.id);
     const preview = google ? input.previews?.[google.query] : undefined;
-    const hit = preview?.results?.[0];
+    // Exactly one clean landscape still per Google scene (no shared duplicate URL)
+    const hit = google ? pickBestGoogleHit(preview, usedGoogleUrls) : null;
+    if (hit?.imageUrl) usedGoogleUrls.add(hit.imageUrl);
     const sceneId = String(i + 1);
     const words = beat.text;
     const wordCount = countWords(words);
 
-    const hasWhisper =
-      typeof beat.start === "number" && typeof beat.end === "number";
-    const durationSec = hasWhisper
-      ? Math.max(0.1, beat.end! - beat.start!)
-      : durationSecFromWords(wordCount, niche.id);
-    const startSec = hasWhisper ? beat.start! : cursorSec;
-    const endSec = hasWhisper ? beat.end! : cursorSec + durationSec;
-    if (!hasWhisper) cursorSec = endSec;
+    // Exact VO timing from words @ niche WPM (Mystery = 160)
+    const durationSec = durationSecFromWords(wordCount, niche.id);
+    const startSec = cursorSec;
+    const endSec = cursorSec + durationSec;
+    cursorSec = endSec;
 
     const base = {
       sceneId,
@@ -115,7 +118,7 @@ export function buildScenes(input: {
       startSec: roundSec(startSec),
       endSec: roundSec(endSec),
       durationSec: roundSec(durationSec),
-      timingSource: (hasWhisper ? "whisper" : "wpm") as "whisper" | "wpm",
+      timingSource: "wpm" as const,
       id: `s${sceneId}`,
       index: i + 1,
       beatId: beat.id,
@@ -137,7 +140,7 @@ export function buildScenes(input: {
         entityContext: google.entityContext,
         why: google.whyGoogle,
         priority: google.priority,
-        imageUrl: hit?.imageUrl ?? hits[0]?.thumbnailUrl ?? null,
+        imageUrl: hit?.imageUrl ?? null,
         thumbnailUrl: hit?.thumbnailUrl ?? hit?.imageUrl ?? null,
         imageCandidates,
         sourceUrl: hit?.sourcePageUrl ?? null,

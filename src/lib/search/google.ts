@@ -10,6 +10,7 @@ export type GoogleImageHit = {
   width?: number;
   height?: number;
   position?: number;
+  score?: number;
 };
 
 export type GoogleSearchPreview = {
@@ -38,6 +39,31 @@ const WATERMARK_DOMAINS = [
   "stock.adobe.com",
   "adobe.stock",
   "vectorstock.com",
+  "gettyimages.com",
+  "gettyimages.",
+  "premiumbeat.com",
+  "motionelements.com",
+];
+
+const TEXT_WATERMARK_HINTS = [
+  "shutterstock",
+  "getty",
+  "alamy",
+  "dreamstime",
+  "watermark",
+  "royalty free",
+  "stock photo",
+  "stock image",
+  "logo",
+  "caption",
+  "subtitle",
+  "meme",
+  "quote",
+  "typography",
+  "text overlay",
+  "infographic",
+  "powerpoint",
+  "slide",
 ];
 
 function domainFromUrl(url?: string): string | undefined {
@@ -47,6 +73,36 @@ function domainFromUrl(url?: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function hasTextOrWatermarkHints(hit: GoogleImageHit): boolean {
+  const blob = `${hit.title || ""} ${hit.sourceName || ""} ${hit.sourceDomain || ""}`.toLowerCase();
+  return TEXT_WATERMARK_HINTS.some((h) => blob.includes(h));
+}
+
+function isLandscape(hit: GoogleImageHit): boolean {
+  if (hit.width && hit.height) return hit.width > hit.height;
+  // Unknown dims: allow but score lower; SearchAPI aspect_ratio=wide already biases
+  return true;
+}
+
+function scoreHit(hit: GoogleImageHit, defaults: ReturnType<typeof getSearchDefaults>): number {
+  let score = 100;
+  if (hit.width && hit.height) {
+    const ratio = hit.width / hit.height;
+    if (ratio < 1.2) score -= 80; // reject-ish portrait/square
+    else if (ratio >= 1.5 && ratio <= 2.1) score += 30; // ~16:9
+    else if (ratio > 1.2) score += 10;
+    if (hit.width >= defaults.minWidth) score += 10;
+    if (hit.height >= defaults.minHeight) score += 5;
+    if (hit.width >= 1280) score += 8;
+  } else {
+    score -= 15;
+  }
+  if (hasTextOrWatermarkHints(hit)) score -= 100;
+  const domain = (hit.sourceDomain || "").toLowerCase();
+  if (WATERMARK_DOMAINS.some((d) => domain.includes(d))) score -= 120;
+  return score;
 }
 
 export async function searchGoogleImages(
@@ -64,12 +120,12 @@ export async function searchGoogleImages(
     q: query,
     api_key: apiKey,
     safe: defaults.safe,
-    aspect_ratio: defaults.aspectRatio,
-    size: defaults.size,
+    aspect_ratio: "wide", // force landscape bias
+    size: defaults.size || "large",
     image_type: "photo",
     nfpr: "1",
     filter: "1",
-    num: String(Math.min(40, Math.max(8, num))),
+    num: String(Math.min(40, Math.max(10, num * 2))),
   });
 
   const res = await fetch(`https://www.searchapi.io/api/v1/search?${params}`, {
@@ -100,23 +156,29 @@ export async function searchGoogleImages(
     })
     .filter((r) => Boolean(r.imageUrl));
 
-  const preferred = mapped.filter((r) => {
-    if (r.width && r.height && r.width <= r.height) return false;
-    if (r.width && r.width < defaults.minWidth) return false;
-    if (r.height && r.height < defaults.minHeight) return false;
-    const domain = (r.sourceDomain || "").toLowerCase();
-    if (WATERMARK_DOMAINS.some((d) => domain.includes(d))) return false;
-    return true;
-  });
+  const scored = mapped
+    .map((r) => ({ ...r, score: scoreHit(r, defaults) }))
+    .filter((r) => {
+      if (!isLandscape(r)) return false;
+      const domain = (r.sourceDomain || "").toLowerCase();
+      if (WATERMARK_DOMAINS.some((d) => domain.includes(d))) return false;
+      if (hasTextOrWatermarkHints(r)) return false;
+      if (r.width && r.height && r.width <= r.height) return false;
+      return (r.score || 0) >= 40;
+    })
+    .sort((a, b) => (b.score || 0) - (a.score || 0));
 
-  let results = preferred;
-  if (results.length < 4) {
-    const backfill = mapped.filter(
-      (r) =>
-        !preferred.includes(r) &&
-        !(r.width && r.height && r.width < r.height),
-    );
-    results = [...preferred, ...backfill];
+  let results = scored;
+  // Soft backfill only landscape non-stock if filter too aggressive
+  if (results.length < 1) {
+    results = mapped
+      .filter((r) => isLandscape(r))
+      .filter((r) => {
+        const domain = (r.sourceDomain || "").toLowerCase();
+        return !WATERMARK_DOMAINS.some((d) => domain.includes(d));
+      })
+      .map((r) => ({ ...r, score: scoreHit(r, defaults) }))
+      .sort((a, b) => (b.score || 0) - (a.score || 0));
   }
 
   return {
@@ -125,4 +187,26 @@ export async function searchGoogleImages(
     results: results.slice(0, num),
     filteredOut: Math.max(0, mapped.length - results.length),
   };
+}
+
+/** Pick one landscape / clean hit, skipping already-used image URLs. */
+export function pickBestGoogleHit(
+  preview: GoogleSearchPreview | undefined,
+  usedUrls?: Set<string>,
+): GoogleImageHit | null {
+  if (!preview?.results?.length) return null;
+  for (const hit of preview.results) {
+    if (usedUrls?.has(hit.imageUrl)) continue;
+    if (!isLandscape(hit)) continue;
+    if (hasTextOrWatermarkHints(hit)) continue;
+    const domain = (hit.sourceDomain || "").toLowerCase();
+    if (WATERMARK_DOMAINS.some((d) => domain.includes(d))) continue;
+    return hit;
+  }
+  // last resort: first unused
+  for (const hit of preview.results) {
+    if (usedUrls?.has(hit.imageUrl)) continue;
+    return hit;
+  }
+  return preview.results[0] || null;
 }

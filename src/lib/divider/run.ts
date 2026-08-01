@@ -6,6 +6,7 @@ import {
   type Beat,
   type DividerResult,
 } from "./schema";
+import { DIRECTOR_BATCH_CONCURRENCY } from "@/lib/jobs/limits";
 
 const DIRECTOR_BATCH_SIZE = 40;
 
@@ -100,20 +101,28 @@ export async function runScriptDivider(input: {
   let inputTokens = 0;
   let outputTokens = 0;
 
-  for (let i = 0; i < batches.length; i++) {
-    const batch = await runDirectorBatch({
-      beats: batches[i],
-      phase,
-      niche: input.niche,
-      batchIndex: i,
-      batchCount: batches.length,
-      totalBeats: beats.length,
-    });
-    merged.googleSearches.push(...batch.result.googleSearches);
-    merged.aiGenerate.push(...batch.result.aiGenerate);
-    model = batch.model;
-    inputTokens += batch.usage?.inputTokens || 0;
-    outputTokens += batch.usage?.outputTokens || 0;
+  const dirConcurrency = Math.max(1, DIRECTOR_BATCH_CONCURRENCY);
+  for (let i = 0; i < batches.length; i += dirConcurrency) {
+    const slice = batches.slice(i, i + dirConcurrency);
+    const results = await Promise.all(
+      slice.map((batchBeats, offset) =>
+        runDirectorBatch({
+          beats: batchBeats,
+          phase,
+          niche: input.niche,
+          batchIndex: i + offset,
+          batchCount: batches.length,
+          totalBeats: beats.length,
+        }),
+      ),
+    );
+    for (const batch of results) {
+      merged.googleSearches.push(...batch.result.googleSearches);
+      merged.aiGenerate.push(...batch.result.aiGenerate);
+      model = batch.model;
+      inputTokens += batch.usage?.inputTokens || 0;
+      outputTokens += batch.usage?.outputTokens || 0;
+    }
   }
 
   // Soft-dedupe exact Google queries but KEEP the first pack's relatedBeatIds
