@@ -120,6 +120,10 @@ export async function generateMissingAiStills(input: {
   const hydrated: SceneRecord[] = await Promise.all(
     scenes.map(async (s) => {
       if (s.imageUrl?.trim()) return s;
+      // Intentionally cleared for a fresh AI still — do NOT revive the old R2 file.
+      if (/regenerating ai without empty-chair/i.test(s.why || "")) {
+        return s;
+      }
       const url = await existingStillUrl(input.jobId, s.index);
       if (!url) return s;
       reattached += 1;

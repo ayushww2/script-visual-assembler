@@ -24,14 +24,8 @@ export function isChairClicheAiScene(scene: SceneRecord): boolean {
     .filter(Boolean)
     .join(" ");
   if (CHAIR_CLICHE.test(blob)) return true;
-  // Failed prior regen used a person name as the whole visual idea
-  const idea = (scene.entityContext || scene.subject || "").trim();
-  if (
-    /without empty-chair/i.test(scene.why || "") &&
-    /^(mel gibson|joe rogan|jim caviezel)$/i.test(idea)
-  ) {
-    return true;
-  }
+  // Stuck after a chair-free regen request (old R2 still re-attached / bad prompt)
+  if (/without empty-chair/i.test(scene.why || "")) return true;
   return false;
 }
 
