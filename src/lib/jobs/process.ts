@@ -35,11 +35,19 @@ async function withJobLock<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 export async function processJob(jobId: string): Promise<void> {
+  console.log("[jobs] processJob enter", jobId);
   await withJobLock(async () => {
     const job = await prisma.job.findUnique({ where: { id: jobId } });
-    if (!job) return;
-    if (job.status === "completed" || job.status === "failed") return;
+    if (!job) {
+      console.warn("[jobs] processJob missing", jobId);
+      return;
+    }
+    if (job.status === "completed" || job.status === "failed") {
+      console.log("[jobs] processJob skip terminal", jobId, job.status);
+      return;
+    }
 
+    console.log("[jobs] processJob running", jobId, "was", job.status);
     await prisma.job.update({
       where: { id: jobId },
       data: {
@@ -243,8 +251,41 @@ export async function resumePendingJobs(): Promise<void> {
     take: 10,
   });
 
+  if (pending.length === 0) return;
+  console.log(
+    "[jobs] resumePendingJobs",
+    pending.map((j) => j.id).join(","),
+  );
+
+  // Await serially so Next request teardown cannot drop the work.
   for (const job of pending) {
-    // Fire and forget; lock serializes work
-    void processJob(job.id);
+    await processJob(job.id);
+  }
+}
+
+const WORKER_IDLE_MS = 5_000;
+
+/** Long-lived loop used by instrumentation — awaits each job to completion. */
+export async function runJobWorkerLoop(): Promise<void> {
+  console.log("[jobs] worker loop online");
+  for (;;) {
+    try {
+      const job = await prisma.job.findFirst({
+        where: { status: { in: ["queued", "running"] } },
+        orderBy: { createdAt: "asc" },
+        select: { id: true, status: true, progress: true },
+      });
+
+      if (!job) {
+        await new Promise((r) => setTimeout(r, WORKER_IDLE_MS));
+        continue;
+      }
+
+      console.log("[jobs] worker claim", job.id, job.status, job.progress);
+      await processJob(job.id);
+    } catch (error) {
+      console.error("[jobs] worker iteration failed", error);
+      await new Promise((r) => setTimeout(r, WORKER_IDLE_MS));
+    }
   }
 }

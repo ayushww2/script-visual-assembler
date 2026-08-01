@@ -1,7 +1,6 @@
-import { NextResponse, after } from "next/server";
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { deriveJobTitle } from "@/lib/jobs/title";
-import { processJob, resumePendingJobs } from "@/lib/jobs/process";
 import { toJobListItem } from "@/lib/jobs/serialize";
 import {
   countTodaysPreviewQueries,
@@ -14,9 +13,6 @@ export const maxDuration = 3600;
 
 export async function GET() {
   try {
-    // Watchdog: pick up any jobs left queued after a deploy/restart
-    void resumePendingJobs().catch(() => undefined);
-
     const [jobs, usedToday] = await Promise.all([
       prisma.job.findMany({
         orderBy: { createdAt: "desc" },
@@ -93,18 +89,12 @@ export async function POST(req: Request) {
         script,
         phase: body.phase || "google-first",
         status: "queued",
-        progress: "Queued — waiting for cloud worker…",
+        progress: "Queued — cloud worker will claim shortly…",
         voiceoverDurationSec,
       },
     });
 
-    after(async () => {
-      try {
-        await processJob(job.id);
-      } catch (err) {
-        console.error("[jobs] processJob failed", job.id, err);
-      }
-    });
+    // Instrumentation worker loop claims queued jobs; no after()/fire-and-forget.
 
     return NextResponse.json(
       {

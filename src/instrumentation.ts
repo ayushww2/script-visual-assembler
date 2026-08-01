@@ -3,24 +3,19 @@ export async function register() {
   if (!process.env.DATABASE_URL) return;
 
   try {
-    const { resumePendingJobs } = await import("@/lib/jobs/process");
+    const { runJobWorkerLoop } = await import("@/lib/jobs/process");
 
-    console.log("[jobs] instrumentation register — resuming pending jobs");
-    await resumePendingJobs();
-
-    // Durable poller: Next request lifecycle can drop fire-and-forget work.
-    // This keeps queued jobs moving on Railway's long-lived Node process.
-    const g = globalThis as unknown as { __scriptAssemblerJobPoller?: boolean };
-    if (!g.__scriptAssemblerJobPoller) {
-      g.__scriptAssemblerJobPoller = true;
-      setInterval(() => {
-        void resumePendingJobs().catch((err) => {
-          console.error("[jobs] poller resume failed", err);
-        });
-      }, 10_000);
-      console.log("[jobs] poller started (every 10s)");
+    // Single awaited worker loop — fire-and-forget + after() were dropping work
+    // on Railway before processJob could mark jobs running.
+    const g = globalThis as unknown as { __scriptAssemblerJobWorker?: boolean };
+    if (!g.__scriptAssemblerJobWorker) {
+      g.__scriptAssemblerJobWorker = true;
+      console.log("[jobs] instrumentation register — starting job worker loop");
+      void runJobWorkerLoop().catch((error) => {
+        console.error("[jobs] worker loop crashed", error);
+      });
     }
   } catch (error) {
-    console.error("[jobs] resume on boot failed", error);
+    console.error("[jobs] worker boot failed", error);
   }
 }

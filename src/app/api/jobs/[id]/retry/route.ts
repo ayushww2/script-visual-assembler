@@ -1,6 +1,5 @@
-import { NextResponse, after } from "next/server";
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { processJob } from "@/lib/jobs/process";
 import { toJobListItem } from "@/lib/jobs/serialize";
 
 export const dynamic = "force-dynamic";
@@ -16,12 +15,13 @@ export async function POST(_req: Request, { params }: Params) {
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
     }
 
+    // Mark queued; instrumentation worker loop claims and awaits processJob.
     const job = await prisma.job.update({
       where: { id },
       data: {
         status: "queued",
         error: null,
-        progress: "Re-queued…",
+        progress: "Re-queued — worker will claim shortly…",
         previewDone: false,
         packageReady: false,
         packageUrl: null,
@@ -29,15 +29,6 @@ export async function POST(_req: Request, { params }: Params) {
         completedAt: null,
         startedAt: null,
       },
-    });
-
-    // Prefer after() so work survives the response; poller is backup.
-    after(async () => {
-      try {
-        await processJob(job.id);
-      } catch (err) {
-        console.error("[jobs] processJob failed", job.id, err);
-      }
     });
 
     return NextResponse.json({ job: toJobListItem(job) }, { status: 202 });
