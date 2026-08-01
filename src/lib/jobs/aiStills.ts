@@ -279,5 +279,46 @@ async function generateMissingAiStillsRealtime(
     });
   });
 
+  // Final pass: any still missing after safety skips → ultra-safe landscape
+  const stillMissing = needAi.filter((s) => !byId.get(s.id)?.imageUrl?.trim());
+  if (stillMissing.length) {
+    await input.onProgress?.(
+      `AI safe-fill ${stillMissing.length} scene(s) after safety skips…`,
+    );
+    await mapPool(stillMissing, Math.min(4, perPart), async (scene) => {
+      try {
+        const image = await generateGptImage({
+          prompt: composeMysteryImagePrompt({
+            visualIdea:
+              "wide documentary photograph of empty ancient stone courtyard at dusk, no people, no text, no logos",
+            subject: "empty courtyard",
+            title: input.title || undefined,
+          }),
+        });
+        const ext = image.contentType.includes("jpeg") ? "jpg" : "png";
+        const key = stillKey(input.jobId, scene.index, ext);
+        const uploaded = await uploadToR2({
+          key,
+          body: image.bytes,
+          contentType: image.contentType,
+        });
+        byId.set(scene.id, {
+          ...scene,
+          visualSource: "ai",
+          imageUrl: uploaded.url,
+          thumbnailUrl: uploaded.url,
+          r2Url: uploaded.url,
+          why: "AI safe-fill after safety reject",
+        });
+      } catch (err) {
+        console.warn(
+          "[aiStills] safe-fill failed",
+          scene.sceneId,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    });
+  }
+
   return input.scenes.map((s) => byId.get(s.id) || s);
 }
