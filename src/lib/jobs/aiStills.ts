@@ -1,5 +1,5 @@
 import type { SceneRecord } from "@/lib/jobs/scenes";
-import { uploadToR2 } from "@/lib/r2";
+import { objectExists, publicUrlForKey, uploadToR2 } from "@/lib/r2";
 import { generateGptImage } from "@/lib/images/openaiImage";
 import { generateGptImagesViaBatch } from "@/lib/images/openaiImageBatch";
 import {
@@ -16,6 +16,15 @@ import { mapPool } from "@/lib/jobs/pool";
 import { mapPartsParallel, PARALLEL_PARTS } from "@/lib/jobs/parallelParts";
 
 export type AiStillProgress = (message: string) => Promise<void> | void;
+export type AiScenesPersist = (scenes: SceneRecord[]) => Promise<void> | void;
+
+async function existingStillUrl(jobId: string, index: number): Promise<string | null> {
+  for (const ext of ["png", "jpg", "jpeg", "webp"] as const) {
+    const key = stillKey(jobId, index, ext === "jpeg" ? "jpg" : ext);
+    if (await objectExists(key)) return publicUrlForKey(key);
+  }
+  return null;
+}
 
 function promptForScene(
   scene: SceneRecord,
@@ -96,6 +105,8 @@ export async function generateMissingAiStills(input: {
   niche?: string | null;
   scenes: SceneRecord[];
   onProgress?: AiStillProgress;
+  /** Persist scenes as AI attaches so a 429 crash doesn't lose work. */
+  onScenesPersist?: AiScenesPersist;
   concurrency?: number;
   parts?: number;
   /** OpenAI Batch API — 50% cheaper, async up to 24h */
@@ -103,13 +114,43 @@ export async function generateMissingAiStills(input: {
   existingBatchId?: string | null;
   onBatchCreated?: (batchId: string) => Promise<void> | void;
 }): Promise<SceneRecord[]> {
-  const needAi = input.scenes.filter((s) => !s.imageUrl?.trim());
-  if (!needAi.length) return input.scenes;
+  // Re-attach any AI stills already on R2 from a prior interrupted run.
+  let scenes = input.scenes;
+  let reattached = 0;
+  const hydrated = await Promise.all(
+    scenes.map(async (s) => {
+      if (s.imageUrl?.trim()) return s;
+      const url = await existingStillUrl(input.jobId, s.index);
+      if (!url) return s;
+      reattached += 1;
+      return {
+        ...s,
+        visualSource: s.visualSource === "google" ? "google" : ("ai" as const),
+        imageUrl: url,
+        thumbnailUrl: url,
+        r2Url: url,
+        why: s.why || "AI still recovered from R2",
+      };
+    }),
+  );
+  scenes = hydrated;
+  if (reattached > 0) {
+    await input.onProgress?.(
+      `Re-attached ${reattached} AI still(s) already on R2…`,
+    );
+    await input.onScenesPersist?.(scenes);
+  }
+
+  const needAi = scenes.filter((s) => !s.imageUrl?.trim());
+  if (!needAi.length) return scenes;
 
   if (input.useBatch) {
-    return generateMissingAiStillsBatch(input, needAi);
+    return generateMissingAiStillsBatch(
+      { ...input, scenes },
+      needAi,
+    );
   }
-  return generateMissingAiStillsRealtime(input, needAi);
+  return generateMissingAiStillsRealtime({ ...input, scenes }, needAi);
 }
 
 async function generateMissingAiStillsBatch(
@@ -185,6 +226,7 @@ async function generateMissingAiStillsRealtime(
     title?: string | null;
     scenes: SceneRecord[];
     onProgress?: AiStillProgress;
+    onScenesPersist?: AiScenesPersist;
     concurrency?: number;
     parts?: number;
   },
@@ -193,6 +235,7 @@ async function generateMissingAiStillsRealtime(
   const byId = new Map(input.scenes.map((s) => [s.id, { ...s }]));
   let done = 0;
   let lastProgressAt = 0;
+  let lastPersistAt = 0;
   const partDone = new Map<number, number>();
   const partTotal = new Map<number, number>();
 
@@ -203,14 +246,36 @@ async function generateMissingAiStillsRealtime(
   const parts = Math.max(1, input.parts ?? PARALLEL_PARTS);
   const perPart = Math.max(1, Math.ceil(totalConcurrency / parts));
 
+  async function persistNow(force = false) {
+    const now = Date.now();
+    if (!force && now - lastPersistAt < 5_000) return;
+    lastPersistAt = now;
+    const snap = input.scenes.map((s) => byId.get(s.id) || s);
+    await input.onScenesPersist?.(snap);
+  }
+
   async function runOne(scene: SceneRecord) {
+    // Prefer already-uploaded R2 still from a prior run
+    const existing = await existingStillUrl(input.jobId, scene.index);
+    if (existing) {
+      byId.set(scene.id, {
+        ...scene,
+        visualSource:
+          scene.visualSource === "unassigned" ? "ai" : scene.visualSource,
+        imageUrl: existing,
+        thumbnailUrl: existing,
+        r2Url: existing,
+        why: scene.why || "AI still recovered from R2",
+      });
+      return;
+    }
+
     let imagePrompt = await promptForSceneRealtime(scene, input.title);
     let image;
     try {
       image = await generateGptImage({ prompt: imagePrompt });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // Safety rejects (e.g. religious/sexual classifiers) → safer documentary rewrite once
       if (/safety|rejected|sexual|violence/i.test(msg)) {
         imagePrompt = composeMysteryImagePrompt({
           visualIdea:
@@ -222,12 +287,15 @@ async function generateMissingAiStillsRealtime(
         try {
           image = await generateGptImage({ prompt: imagePrompt });
         } catch {
-          console.warn("[aiStills] skip scene after safety reject", scene.sceneId, msg);
-          return; // leave missing; package may still proceed with partial if others ok
+          console.warn(
+            "[aiStills] skip scene after safety reject",
+            scene.sceneId,
+            msg,
+          );
+          return;
         }
-      } else if (/rate limit|429/i.test(msg)) {
-        throw err; // let outer retry/backoff in generateGptImage; rethrow if exhausted
       } else {
+        // Rate limits are retried inside generateGptImage; other errors skip scene.
         console.warn("[aiStills] scene failed", scene.sceneId, msg);
         return;
       }
@@ -267,17 +335,22 @@ async function generateMissingAiStillsRealtime(
         now - lastProgressAt >= 2_000
       ) {
         lastProgressAt = now;
+        const attached = needAi.filter((s) =>
+          byId.get(s.id)?.imageUrl?.trim(),
+        ).length;
         const partBits = Array.from({ length: partCount }, (_, i) => {
           const d = partDone.get(i) || 0;
           const t = partTotal.get(i) || 0;
           return `${i + 1}:${d}/${t}`;
         }).join(" ");
         await input.onProgress?.(
-          `AI ×${partCount} parts (×${perPart} each) · ${done}/${needAi.length} · ${partBits}`,
+          `AI ×${partCount} parts (×${perPart} each) · ${attached}/${needAi.length} attached · ${partBits}`,
         );
+        await persistNow();
       }
     });
   });
+  await persistNow(true);
 
   // Final pass: any still missing after safety skips → ultra-safe landscape
   const stillMissing = needAi.filter((s) => !byId.get(s.id)?.imageUrl?.trim());

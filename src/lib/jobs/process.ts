@@ -117,6 +117,15 @@ export async function processJob(jobId: string): Promise<void> {
           niche: job.niche,
           scenes,
           onProgress,
+          onScenesPersist: async (next) => {
+            await prisma.job.update({
+              where: { id: jobId },
+              data: {
+                scenesJson: next as unknown as Prisma.InputJsonValue,
+                sceneCount: next.length,
+              },
+            });
+          },
           parts: PARALLEL_PARTS,
           useBatch: Boolean(job.aiBatch),
           existingBatchId: job.aiBatchId,
@@ -267,6 +276,15 @@ export async function processJob(jobId: string): Promise<void> {
         niche: job.niche,
         scenes,
         onProgress,
+        onScenesPersist: async (next) => {
+          await prisma.job.update({
+            where: { id: jobId },
+            data: {
+              scenesJson: next as unknown as Prisma.InputJsonValue,
+              sceneCount: next.length,
+            },
+          });
+        },
         parts: PARALLEL_PARTS,
         useBatch: Boolean(job.aiBatch),
         existingBatchId: job.aiBatchId,

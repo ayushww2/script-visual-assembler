@@ -14,12 +14,12 @@ export const GOOGLE_SEARCH_CONCURRENCY = Math.max(
 
 /**
  * gpt-image-2 in-flight cap.
- * Org limit is often ~20 images/min — keep concurrency ≤8 and retry 429s.
+ * Org limit is ~20 images/min — keep concurrency low so we don't trip 429s.
  * Override with AI_STILL_CONCURRENCY env.
  */
 export const AI_STILL_CONCURRENCY = Math.max(
   1,
-  Number(process.env.AI_STILL_CONCURRENCY || 8) || 8,
+  Number(process.env.AI_STILL_CONCURRENCY || 4) || 4,
 );
 /**
  * When true, each AI still calls ContactBox to engineer the prompt (~15–18s each).

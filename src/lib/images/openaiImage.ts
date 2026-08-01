@@ -59,7 +59,8 @@ export async function generateGptImage(params: {
 
   const openai = createOpenAiImageClient();
   let lastErr: unknown;
-  for (let attempt = 0; attempt < 8; attempt++) {
+  // Stay under org 20 images/min — wait out 429s instead of failing the job.
+  for (let attempt = 0; attempt < 40; attempt++) {
     try {
       const result = (await openai.images.generate({
         model,
@@ -114,8 +115,8 @@ export async function generateGptImage(params: {
       throw new Error("GPT Image response missing b64_json and url");
     } catch (err) {
       lastErr = err;
-      if (isRateLimitError(err) && attempt < 7) {
-        const wait = Math.min(60_000, retryAfterMs(err) * (attempt + 1));
+      if (isRateLimitError(err) && attempt < 39) {
+        const wait = Math.min(90_000, Math.max(5_000, retryAfterMs(err) * 2));
         await sleep(wait);
         continue;
       }
