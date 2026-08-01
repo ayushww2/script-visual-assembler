@@ -23,22 +23,28 @@ Do not search the exact spoken sentence.
 Search the underlying visual subject.
 
 ────────────────────────────────
-STEP B — GOOGLE vs AI (50 / 50)
+STEP B — GOOGLE vs AI
 ────────────────────────────────
-Target EXACTLY ~50% Google and ~50% AI for this batch of beats (within ±2 beats).
+HARD RULE (never break):
+If a beat names a REAL person, place, event, movie/film/TV/podcast title,
+organization, or other searchable proper noun → MUST be GOOGLE.
+Examples: Mel Gibson, Jesus Christ, Joe Rogan, The Passion of the Christ,
+The Resurrection of the Christ, Randall Wallace, Vatican, Jerusalem, Golgotha.
+Never assign those beats to AI. Write a tight entity-first Google query instead.
 
-A) GOOGLE — when authentic real-world photos likely exist:
-- specific people, named places, wildlife, news photos
+Among the REMAINING abstract / conceptual / unrecorded beats only:
+- Prefer AI for emotion, unseen spiritual battle, speculative interiors, metaphor
+- Soft target overall ~50/50 Google/AI, but NEVER move a named-real beat to AI
+  to hit the ratio. Named-real always wins over the ratio.
+
+A) GOOGLE — authentic real-world photos:
+- named people, places, films, shows, events, news photos
 - maps, satellite, manuscripts, scientific fieldwork
-- Yellowstone / wolves / hunting / known historical events
 
-B) AI GENERATE — when Google cannot give a truthful enough still:
-- unrecorded moments, conceptual tension (law, fear, legacy)
+B) AI GENERATE — only when no truthful real photo should exist:
+- unrecorded private moments, conceptual tension, unseen spiritual imagery
 - impossible camera views, speculative reconstructions
-- anything that would force a misleading “fake real” stock photo
-
-Prefer Google for concrete real entities.
-Prefer AI for abstract/policy/emotion beats.
+- NEVER invent a fake photo of a real named person/film/place
 
 ────────────────────────────────
 STEP C — GOOGLE QUERY RULES
@@ -130,7 +136,8 @@ SELECTED NICHE: ${niche.label} ${niche.version}
 ${niche.promptGuide}
 
 This batch: ${sceneCount} beats · ~${minutes.toFixed(2)} min @ ${niche.wpm} WPM
-Target split for THIS batch: ~${targetGoogle} Google · ~${targetAi} AI (50/50)
+Soft target for THIS batch: ~${targetGoogle} Google · ~${targetAi} AI —
+but named real people/places/events/movies MUST be Google even if that shifts the mix.
 
 BEATS:
 ${beatBlock}
