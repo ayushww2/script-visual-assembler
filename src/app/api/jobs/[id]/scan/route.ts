@@ -6,6 +6,19 @@ import { getContactBoxConfig } from "@/lib/contactbox";
 export const dynamic = "force-dynamic";
 export const maxDuration = 3600;
 
+export async function GET(
+  _req: Request,
+  ctx: { params: Promise<{ id: string }> },
+) {
+  const { id } = await ctx.params;
+  return NextResponse.json({
+    jobId: id,
+    scanVersion: 3,
+    modes: ["vision", "text"],
+    usage: "POST ?mode=text|vision&start=0&limit=10",
+  });
+}
+
 /** POST — ContactBox vision QA over scene stills vs narration words. ?start=0&limit=50 for chunks. */
 export async function POST(
   req: Request,
@@ -56,7 +69,7 @@ export async function POST(
         : withImages.slice(start);
     const result =
       mode === "text"
-        ? await scanAllScenesText(slice, { batchSize: 30, concurrency: 2 })
+        ? await scanAllScenesText(slice, { batchSize: 10, concurrency: 1 })
         : await scanAllScenes(slice, {
             batchSize: Math.min(3, slice.length || 1),
             concurrency: 1,
