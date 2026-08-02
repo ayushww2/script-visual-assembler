@@ -37,15 +37,12 @@ export type SceneScanResult = {
 
 const SCAN_SYSTEM = `You are a documentary visual QA reviewer for YouTube Mystery films.
 
-For each scene you receive:
-- sceneId
-- spoken narration (words)
-- a still image URL
+For each scene you receive sceneId, spoken narration (words), and a still image.
 
 Judge whether the still honestly supports what is being said RIGHT NOW.
 
 Flag problems such as:
-- wrong person (e.g. Andrew Garfield instead of Mel Gibson, wrong celebrity)
+- wrong person (e.g. Andrew Garfield instead of Mel Gibson)
 - movie poster / thumbnail / meme / quote card / logo graphic
 - watermark or stock-photo junk
 - CGI / 3D sculpt / digital art instead of documentary photo
@@ -53,8 +50,6 @@ Flag problems such as:
 - place/artifact mismatch (wrong location, wrong film still, unrelated B-roll)
 - readable text overlays that dominate the frame
 - dual-person collage when beat is about one person
-
-When narration names Mel Gibson, Joe Rogan, Jesus film scenes, tombs, crucifixion, etc. — the image must match that subject.
 
 Return JSON only:
 {
@@ -84,6 +79,14 @@ function costFromUsage(inputTokens: number, outputTokens: number): number {
   );
 }
 
+async function imageToDataUrl(url: string): Promise<string> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+  if (!res.ok) throw new Error(`Image fetch ${res.status}: ${url}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  const mime = res.headers.get("content-type") || "image/jpeg";
+  return `data:${mime};base64,${buf.toString("base64")}`;
+}
+
 export async function scanSceneBatch(
   scenes: SceneScanInput[],
   batchIndex: number,
@@ -102,7 +105,7 @@ export async function scanSceneBatch(
   > = [
     {
       type: "text",
-      text: `Batch ${batchIndex + 1}/${batchCount}. Review ${scenes.length} scenes. For each scene, read words then inspect the image that follows.\n\n`,
+      text: `Batch ${batchIndex + 1}/${batchCount}. Review ${scenes.length} scene(s). Read words then inspect each image.\n`,
     },
   ];
 
@@ -111,15 +114,16 @@ export async function scanSceneBatch(
       type: "text",
       text: `\n--- sceneId=${scene.sceneId} index=${scene.index} ---\nwords: ${scene.words}\n`,
     });
+    const dataUrl = await imageToDataUrl(scene.imageUrl);
     userContent.push({
       type: "image_url",
-      image_url: { url: scene.imageUrl, detail: "low" },
+      image_url: { url: dataUrl, detail: "low" },
     });
   }
 
   userContent.push({
     type: "text",
-    text: `\nReturn reviews for all sceneIds: ${scenes.map((s) => s.sceneId).join(", ")}`,
+    text: `\nReturn reviews for: ${scenes.map((s) => s.sceneId).join(", ")}`,
   });
 
   const completion = await client.chat.completions.create({
@@ -161,7 +165,6 @@ export async function scanSceneBatch(
     });
   }
 
-  // Scenes the model skipped → note as unscanned
   for (const scene of scenes) {
     if (reviews.some((r) => r.sceneId === scene.sceneId)) continue;
     reviews.push({
@@ -184,13 +187,13 @@ export async function scanSceneBatch(
   };
 }
 
-/** Vision-scan scenes in batches (default 15 scenes / call). */
+/** Vision-scan scenes in batches (default 1 scene / call for reliability). */
 export async function scanAllScenes(
   scenes: SceneScanInput[],
   opts?: { batchSize?: number; concurrency?: number },
 ): Promise<SceneScanResult> {
-  const batchSize = Math.max(1, opts?.batchSize ?? 15);
-  const concurrency = Math.max(1, opts?.concurrency ?? 2);
+  const batchSize = Math.max(1, opts?.batchSize ?? 1);
+  const concurrency = Math.max(1, opts?.concurrency ?? 1);
 
   const batches: SceneScanInput[][] = [];
   for (let i = 0; i < scenes.length; i += batchSize) {
