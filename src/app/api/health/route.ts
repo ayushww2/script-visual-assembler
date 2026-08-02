@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
 import { getContactBoxConfig } from "@/lib/contactbox";
-import {
-  getOpenAiImageConfig,
-  getPexelsConfig,
-  getSearchApiKey,
-} from "@/lib/env";
+import { getOpenAiImageConfig, getSearchApiKey } from "@/lib/env";
 import { prisma } from "@/lib/db";
 import {
   countTodaysPreviewQueries,
@@ -44,12 +40,6 @@ export async function GET() {
       model: getOpenAiImageConfig().model,
       size: getOpenAiImageConfig().size,
       quality: getOpenAiImageConfig().quality,
-    },
-    pexels: {
-      configured: Boolean(getPexelsConfig().apiKey),
-      enabled: getPexelsConfig().enabled,
-      useSec: getPexelsConfig().useSec,
-      maxPerJob: getPexelsConfig().maxPerJob,
     },
     capacity: {
       usedToday,

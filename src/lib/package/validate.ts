@@ -57,23 +57,6 @@ export async function validateRenderPackage(
         message: `${label}: imageUrl must not be localhost`,
       });
     }
-    if (s.videoUrl) {
-      if (!s.videoUrl.startsWith("https://")) {
-        issues.push({
-          code: "videoUrl",
-          message: `${label}: videoUrl must be public HTTPS`,
-        });
-      }
-      if (
-        s.videoUrl.includes("localhost") ||
-        s.videoUrl.includes("127.0.0.1")
-      ) {
-        issues.push({
-          code: "videoUrl",
-          message: `${label}: videoUrl must not be localhost`,
-        });
-      }
-    }
     if (s.endSec <= s.startSec) {
       issues.push({
         code: "timing",

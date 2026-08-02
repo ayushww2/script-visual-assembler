@@ -1,6 +1,8 @@
 # Script Divider
 
-Documentary director for Mystery YouTube films — Google/AI stills, optional Pexels B-roll clips.
+Documentary director for images-only Mystery YouTube films.
+
+**Phase 1:** Google search logic with cloud background jobs.
 
 ## Flow
 
@@ -8,8 +10,9 @@ Documentary director for Mystery YouTube films — Google/AI stills, optional Pe
 2. Job is queued on Railway and runs in the background
 3. ContactBoxTools builds entity-first Google packs (+ AI candidates)
 4. SearchAPI previews each query and stores results in Postgres
-5. Optional: Pexels landscape clips (~4–5s use, looped) on place/B-roll scenes
-6. Remotion package uploaded to R2 (`imageUrl` + optional `videoUrl`)
+5. Open past jobs anytime from the sidebar
+
+Sized for ~**30–40 Google query previews / day** (soft limit, one job at a time).
 
 ## Stack
 
@@ -17,8 +20,6 @@ Documentary director for Mystery YouTube films — Google/AI stills, optional Pe
 - Postgres (Prisma)
 - ContactBoxTools
 - SearchAPI.io Google Images
-- OpenAI gpt-image-2 (AI stills)
-- Pexels Videos API (optional B-roll)
 
 ## Local
 
@@ -28,8 +29,6 @@ cp .env.example .env
 npx prisma migrate dev
 npm run dev
 ```
-
-Set `PEXELS_API_KEY` (free at https://www.pexels.com/api/) to enable short clips.
 
 ## API
 

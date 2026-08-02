@@ -3,7 +3,6 @@ import { PACKAGE_STILL_CONCURRENCY } from "@/lib/jobs/limits";
 import { getR2Config, uploadToR2 } from "@/lib/r2";
 import {
   DEFAULT_PACKAGE_WPM,
-  PACKAGE_VERSION,
   type RenderPackage,
 } from "./schema";
 import { timeChunksAtWpm } from "./timing";
@@ -199,23 +198,12 @@ export async function buildAndUploadRenderPackage(
 
   const packageScenes = updatedScenes.map((scene, i) => {
     const t = timed[i];
-    const imageUrl = r2BySceneId.get(scene.sceneId)!;
-    const base = {
+    return {
       words: t.words,
-      imageUrl,
+      imageUrl: r2BySceneId.get(scene.sceneId)!,
       startSec: t.startSec,
       endSec: t.endSec,
       durationSec: t.durationSec,
-    };
-    const videoUrl = scene.videoUrl?.trim();
-    if (!videoUrl?.startsWith("https://")) return base;
-    return {
-      ...base,
-      videoUrl,
-      videoUseSec: scene.videoUseSec || 5,
-      videoDurationSec: scene.videoDurationSec || undefined,
-      videoLoop: scene.videoLoop !== false,
-      videoSource: scene.videoSource || undefined,
     };
   });
 
@@ -240,7 +228,6 @@ export async function buildAndUploadRenderPackage(
         : 0;
 
   const pkg: RenderPackage = {
-    version: PACKAGE_VERSION,
     scenes: packageScenes,
   };
 

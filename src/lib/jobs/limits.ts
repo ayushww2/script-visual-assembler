@@ -32,11 +32,6 @@ export const AI_PROMPT_ENGINEER =
 export const DIRECTOR_BATCH_CONCURRENCY = 4;
 /** Parallel R2 still packaging. */
 export const PACKAGE_STILL_CONCURRENCY = 12;
-/** Parallel Pexels video searches / downloads. */
-export const PEXELS_CONCURRENCY = Math.max(
-  1,
-  Number(process.env.PEXELS_CONCURRENCY || 2) || 2,
-);
 
 export async function countTodaysPreviewQueries(): Promise<number> {
   const start = new Date();
