@@ -136,10 +136,21 @@ function dayLabel(iso: string) {
   });
 }
 
+/** Prefer completedAt so re-packaged / re-finished jobs show under "today". */
+function jobListDate(job: JobListItem): string {
+  return job.completedAt || job.createdAt;
+}
+
 function groupJobsByDay(jobs: JobListItem[]): DayGroup[] {
+  // Newest activity first within each day and across days
+  const sorted = [...jobs].sort(
+    (a, b) =>
+      new Date(jobListDate(b)).getTime() - new Date(jobListDate(a)).getTime(),
+  );
   const map = new Map<string, DayGroup>();
-  for (const job of jobs) {
-    const key = dayKey(job.createdAt);
+  for (const job of sorted) {
+    const when = jobListDate(job);
+    const key = dayKey(when);
     const existing = map.get(key);
     if (existing) {
       existing.jobs.push(job);
@@ -147,7 +158,7 @@ function groupJobsByDay(jobs: JobListItem[]): DayGroup[] {
     } else {
       map.set(key, {
         key,
-        label: dayLabel(job.createdAt),
+        label: dayLabel(when),
         count: 1,
         jobs: [job],
       });
