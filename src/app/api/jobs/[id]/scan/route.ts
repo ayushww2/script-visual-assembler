@@ -53,7 +53,10 @@ export async function POST(
       limit !== undefined
         ? withImages.slice(start, start + limit)
         : withImages.slice(start);
-    const result = await scanAllScenes(slice, { batchSize: 8, concurrency: 1 });
+    const result = await scanAllScenes(slice, {
+      batchSize: Math.min(3, slice.length || 1),
+      concurrency: 1,
+    });
 
     return NextResponse.json({
       jobId: id,
