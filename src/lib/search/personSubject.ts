@@ -1,10 +1,17 @@
 /**
  * Decide the single person a beat/scene is about (for Google 1-person picks).
  * Always return a full searchable name — never bare "Gibson".
+ * Places (Lake Tahoe, Yellowstone, …) are NOT people — see placeSubject.ts.
  */
+
+import { isPlaceOrObjectName } from "@/lib/search/placeSubject";
 
 const PROPER_PERSON =
   /\b([A-Z][a-z]+(?:\s+[A-Z][a-zA-Z'-]+)+)\b/g;
+
+/** Place / geo names that must never become a person lock. */
+const NOT_A_PERSON =
+  /\b(Lake|Mount|Mt|Park|Sea|Ocean|River|Desert|Canyon|Valley|Island|Bay|Gulf|Falls|Forest|Glacier|Crater|Basin|Reef|Shore|Tahoe|Yellowstone|Jerusalem|Vatican|Golgotha|Calvary)\b/;
 
 /**
  * Return the ONE person this beat is primarily about.
@@ -89,6 +96,7 @@ export function primaryPersonFromText(
     const words = s.split(/\s+/);
     if (words.length < 2 || words.length > 3) return false;
     if (/^(The|A|An)\b/.test(s)) return false;
+    if (NOT_A_PERSON.test(s) || isPlaceOrObjectName(s)) return false;
     if (
       /\b(Christ|Passion|Resurrection|Experience)\b/i.test(s) &&
       !/\bJesus\b/i.test(s)
@@ -108,6 +116,7 @@ export function primaryPersonFromText(
   }
   const best = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
   const raw = people.find((p) => p.toLowerCase() === best) || people[0];
+  if (isPlaceOrObjectName(raw)) return null;
   if (/^gibson$/i.test(raw)) return "Mel Gibson";
   if (/^rogan$/i.test(raw)) return "Joe Rogan";
   return raw;

@@ -1,5 +1,10 @@
 import { getSearchApiKey, getSearchDefaults } from "@/lib/env";
 import { personSearchNegatives } from "@/lib/search/personSubject";
+import {
+  isPlaceOrObjectName,
+  placeSearchNegatives,
+  primaryPlaceFromText,
+} from "@/lib/search/placeSubject";
 
 export type GoogleImageHit = {
   title: string;
@@ -26,6 +31,8 @@ export type PickGoogleOptions = {
   usedUrls?: Set<string>;
   /** When set, prefer a clean photo of THIS one person only. */
   personName?: string | null;
+  /** Place/object lock — reject people, weddings, tourists. */
+  placeName?: string | null;
 };
 
 type SearchApiImage = {
@@ -211,6 +218,34 @@ const GROUP_SHOT_HINTS = [
   "split portrait",
 ];
 
+/** People / wedding stock that must never represent a place or object. */
+const PEOPLE_IN_PLACE_HINTS = [
+  "wedding",
+  "bride",
+  "groom",
+  "couple",
+  "engagement",
+  "elopement",
+  "proposal",
+  "portrait",
+  "portraits",
+  "tourist",
+  "tourists",
+  "family photo",
+  "honeymoon",
+  "tulle",
+  "gown",
+  "bridal",
+  "micro-wedding",
+  "micro wedding",
+  "selfie",
+  "influencer",
+  "model posing",
+  "people on",
+  "man and woman",
+  "husband and wife",
+];
+
 /** Other celebrities that must not appear when locked to one person. */
 const OTHER_FAMOUS = [
   "andrew garfield",
@@ -250,6 +285,23 @@ function hasWatermarkInUrl(url?: string | null): boolean {
 function isGroupShot(hit: GoogleImageHit): boolean {
   const blob = hitBlob(hit);
   return GROUP_SHOT_HINTS.some((h) => blob.includes(h));
+}
+
+function hasPeopleInPlaceHit(hit: GoogleImageHit): boolean {
+  const blob = hitBlob(hit);
+  return PEOPLE_IN_PLACE_HINTS.some((h) => blob.includes(h));
+}
+
+function sceneHasPeopleInPlace(scene: {
+  sourceUrl?: string | null;
+  imageUrl?: string | null;
+  why?: string | null;
+  query?: string | null;
+  subject?: string | null;
+  words?: string | null;
+}): boolean {
+  const blob = `${scene.sourceUrl || ""} ${scene.imageUrl || ""} ${scene.why || ""} ${scene.query || ""} ${scene.subject || ""} ${scene.words || ""}`.toLowerCase();
+  return PEOPLE_IN_PLACE_HINTS.some((h) => blob.includes(h));
 }
 
 function isLandscape(hit: GoogleImageHit): boolean {
@@ -340,6 +392,17 @@ export function isBadGoogleScenePick(scene: {
     return true;
   }
 
+  // Place/object beats must not use wedding/tourist/people stock
+  const place =
+    primaryPlaceFromText(scene.words, scene.query, scene.subject, scene.why) ||
+    (isPlaceOrObjectName(scene.subject) ? scene.subject : null) ||
+    (isPlaceOrObjectName(scene.query) ? scene.query : null);
+  if (place && sceneHasPeopleInPlace(scene)) return true;
+  // Mis-labeled "single-person: Lake Tahoe" etc.
+  if (/single-person:\s*(lake|yellowstone|tahoe|vatican|jerusalem)/i.test(scene.why || "")) {
+    return true;
+  }
+
   return false;
 }
 
@@ -347,16 +410,41 @@ export function isBadGoogleScenePick(scene: {
 export function withCleanPhotoQuery(
   query: string,
   personName?: string | null,
+  placeName?: string | null,
 ): string {
   const person = (personName || "").trim();
+  const place = (placeName || "").trim();
   const base = (query || "").trim();
-  // Always search the full person name when locked — never bare surname.
-  const core = person ? `"${person}" portrait photo` : base;
-  const personNeg = personSearchNegatives(person);
-  return `${core} -logo -watermark -text -subtitle -meme -quote -poster -thumbnail -collage -screenshot -composite -creativemarket ${personNeg}`.replace(
-    /\s+/g,
-    " ",
-  ).trim();
+
+  // Person lock — portrait of that person only
+  if (person && !isPlaceOrObjectName(person)) {
+    const personNeg = personSearchNegatives(person);
+    return `"${person}" portrait photo -logo -watermark -text -subtitle -meme -quote -poster -thumbnail -collage -screenshot -composite -creativemarket ${personNeg}`
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  // Place / object lock — empty landscape or gear, no people
+  if (place || isPlaceOrObjectName(base)) {
+    const p = place || base;
+    const placeNeg = placeSearchNegatives(p);
+    let core = p;
+    const pl = p.toLowerCase();
+    if (pl.includes("tahoe") && !/underwater|rov|aerial|lakebed/.test(base.toLowerCase())) {
+      core = /underwater|deep|beneath|dark|rov|lakebed/i.test(base)
+        ? "Lake Tahoe underwater ROV"
+        : "Lake Tahoe aerial landscape empty";
+    } else if (!/aerial|landscape|underwater|rov/.test(base.toLowerCase())) {
+      core = `${p} landscape aerial`;
+    } else {
+      core = base;
+    }
+    return `${core} ${placeNeg}`.replace(/\s+/g, " ").trim();
+  }
+
+  return `${base} -logo -watermark -text -subtitle -meme -quote -poster -thumbnail -collage -screenshot -composite -creativemarket -wedding -bride -couple`
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
@@ -443,6 +531,7 @@ function scoreHit(
   hit: GoogleImageHit,
   defaults: ReturnType<typeof getSearchDefaults>,
   personName?: string | null,
+  placeName?: string | null,
 ): number {
   let score = 100;
   if (hit.width && hit.height) {
@@ -462,7 +551,11 @@ function scoreHit(
   if (isBlockedMediaDomain(domain) || isBlockedMediaDomain(hit.imageUrl)) {
     score -= 200;
   }
-  if (personName) {
+  if (placeName) {
+    if (hasPeopleInPlaceHit(hit)) score -= 200;
+    else score += 20;
+  }
+  if (personName && !isPlaceOrObjectName(personName)) {
     score += personMatchScore(hit, personName);
     if (isGroupShot(hit)) score -= 60;
     if (mentionsOtherFamousPerson(hit, personName)) score -= 70;
@@ -473,7 +566,7 @@ function scoreHit(
 export async function searchGoogleImages(
   query: string,
   num = 8,
-  opts?: { personName?: string | null },
+  opts?: { personName?: string | null; placeName?: string | null },
 ): Promise<GoogleSearchPreview> {
   const apiKey = getSearchApiKey();
   if (!apiKey) {
@@ -481,8 +574,17 @@ export async function searchGoogleImages(
   }
 
   const defaults = getSearchDefaults();
-  const personName = opts?.personName || null;
-  const q = withCleanPhotoQuery(query, personName);
+  let personName = opts?.personName || null;
+  let placeName = opts?.placeName || null;
+  // Never person-lock a place name (Lake Tahoe ≠ portrait subject)
+  if (personName && isPlaceOrObjectName(personName)) {
+    placeName = placeName || personName;
+    personName = null;
+  }
+  if (!placeName) {
+    placeName = primaryPlaceFromText(query, placeName);
+  }
+  const q = withCleanPhotoQuery(query, personName, placeName);
 
   const params = new URLSearchParams({
     engine: "google_images",
@@ -526,9 +628,10 @@ export async function searchGoogleImages(
     .filter((r) => Boolean(r.imageUrl));
 
   const scored = mapped
-    .map((r) => ({ ...r, score: scoreHit(r, defaults, personName) }))
+    .map((r) => ({ ...r, score: scoreHit(r, defaults, personName, placeName) }))
     .filter((r) => {
       if (!isCleanPhoto(r)) return false;
+      if (placeName && hasPeopleInPlaceHit(r)) return false;
       if (personName && isGroupShot(r)) return false;
       if (personName && personMatchScore(r, personName) < 0) return false;
       if (personName && mentionsOtherFamousPerson(r, personName)) return false;
@@ -541,8 +644,9 @@ export async function searchGoogleImages(
     results = mapped
       .filter((r) => isLandscape(r))
       .filter((r) => isCleanPhoto(r))
+      .filter((r) => !placeName || !hasPeopleInPlaceHit(r))
       .filter((r) => !personName || personMatchScore(r, personName) >= 40)
-      .map((r) => ({ ...r, score: scoreHit(r, defaults, personName) }))
+      .map((r) => ({ ...r, score: scoreHit(r, defaults, personName, placeName) }))
       .sort((a, b) => (b.score || 0) - (a.score || 0));
   }
 
@@ -554,7 +658,7 @@ export async function searchGoogleImages(
   };
 }
 
-/** Pick one clean landscape hit, optionally locked to one person. */
+/** Pick one clean landscape hit, optionally locked to one person or place. */
 export function pickBestGoogleHit(
   preview: GoogleSearchPreview | undefined,
   usedUrlsOrOpts?: Set<string> | PickGoogleOptions,
@@ -562,12 +666,20 @@ export function pickBestGoogleHit(
 ): GoogleImageHit | null {
   let usedUrls: Set<string> | undefined;
   let personName: string | null | undefined;
+  let placeName: string | null | undefined;
   if (usedUrlsOrOpts instanceof Set) {
     usedUrls = usedUrlsOrOpts;
     personName = maybeOpts?.personName;
+    placeName = maybeOpts?.placeName;
   } else if (usedUrlsOrOpts) {
     usedUrls = usedUrlsOrOpts.usedUrls;
     personName = usedUrlsOrOpts.personName;
+    placeName = usedUrlsOrOpts.placeName;
+  }
+
+  if (personName && isPlaceOrObjectName(personName)) {
+    placeName = placeName || personName;
+    personName = null;
   }
 
   if (!preview?.results?.length) return null;
@@ -580,24 +692,28 @@ export function pickBestGoogleHit(
         (hit.score || 0) +
         personMatchScore(hit, personName) +
         (personName && isGroupShot(hit) ? -60 : 0) +
-        (personName && mentionsOtherFamousPerson(hit, personName) ? -70 : 0),
+        (personName && mentionsOtherFamousPerson(hit, personName) ? -70 : 0) +
+        (placeName && hasPeopleInPlaceHit(hit) ? -200 : 0) +
+        (placeName && !hasPeopleInPlaceHit(hit) ? 20 : 0),
     }))
     .sort((a, b) => b.score - a.score);
 
-  // Strict: clean + full name match + not group/composite
+  // Strict: clean + full name match + not group/composite / no people on places
   for (const { hit } of ranked) {
     if (usedUrls?.has(hit.imageUrl)) continue;
     if (!isCleanPhoto(hit)) continue;
+    if (placeName && hasPeopleInPlaceHit(hit)) continue;
     if (personName && isGroupShot(hit)) continue;
     if (personName && mentionsOtherFamousPerson(hit, personName)) continue;
     if (personName && personMatchScore(hit, personName) < 40) continue;
     return hit;
   }
 
-  // Slightly relax: still require full name if person locked
+  // Slightly relax: still require full name if person locked; still no people on places
   for (const { hit } of ranked) {
     if (usedUrls?.has(hit.imageUrl)) continue;
     if (!isCleanPhoto(hit)) continue;
+    if (placeName && hasPeopleInPlaceHit(hit)) continue;
     if (personName && isGroupShot(hit)) continue;
     if (personName && personMatchScore(hit, personName) < 40) continue;
     return hit;

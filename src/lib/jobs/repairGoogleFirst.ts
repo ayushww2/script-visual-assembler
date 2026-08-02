@@ -7,7 +7,7 @@ import {
   pickBestGoogleHit,
   searchGoogleImages,
 } from "@/lib/search/google";
-import { primaryPersonFromText } from "@/lib/search/personSubject";
+import { resolveGoogleSubject } from "@/lib/search/resolveSubject";
 import { mapPool } from "@/lib/jobs/pool";
 
 export type RepairProgress = (message: string) => Promise<void> | void;
@@ -67,27 +67,34 @@ export async function repairMisplacedAiToGoogle(input: {
     const scan = [scene.subject, scene.words, scene.query, input.title]
       .filter(Boolean)
       .join(" ");
-    const personName = primaryPersonFromText(
+    const { personName, placeName } = resolveGoogleSubject(
       scene.words,
       scene.scriptText,
       scene.subject,
       scene.query,
+      input.title,
     );
     const idea = [scene.entityContext, scene.subject].filter(Boolean).join(" ");
     const query = (
-      personName
-        ? personName
-        : queryForGoogleableBeat(scan) ||
-          (DOC_CLICHE.test(idea) ? "yellowstone gray wolf" : "") ||
-          scene.subject ||
-          scene.words.split(/\s+/).slice(0, 4).join(" ")
+      placeName
+        ? queryForGoogleableBeat(scan) || `${placeName}`
+        : personName
+          ? personName
+          : queryForGoogleableBeat(scan) ||
+            (DOC_CLICHE.test(idea) ? "yellowstone gray wolf" : "") ||
+            scene.subject ||
+            scene.words.split(/\s+/).slice(0, 4).join(" ")
     ).trim();
 
     try {
-      const preview = await searchGoogleImages(query, 16, { personName });
+      const preview = await searchGoogleImages(query, 16, {
+        personName,
+        placeName,
+      });
       const hit = pickBestGoogleHit(preview, {
         usedUrls: used,
         personName,
+        placeName,
       });
       if (!hit?.imageUrl) {
         failed += 1;
@@ -97,7 +104,7 @@ export async function repairMisplacedAiToGoogle(input: {
           ...scene,
           visualSource: "google",
           query,
-          subject: personName || scene.subject,
+          subject: placeName || personName || scene.subject,
           imageUrl: hit.imageUrl,
           thumbnailUrl: hit.thumbnailUrl || hit.imageUrl,
           sourceUrl: hit.sourcePageUrl || null,
@@ -106,7 +113,9 @@ export async function repairMisplacedAiToGoogle(input: {
             .map((r) => r.imageUrl)
             .filter(Boolean)
             .slice(0, 8),
-          why: "Google-first: photographable subject — real photo preferred over AI",
+          why: placeName
+            ? `Google-first place only (no people): ${placeName}`
+            : "Google-first: photographable subject — real photo preferred over AI",
           r2Url: null,
         };
         repaired += 1;

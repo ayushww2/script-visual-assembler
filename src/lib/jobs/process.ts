@@ -7,7 +7,7 @@ import {
   PREVIEW_IMAGES_PER_QUERY,
 } from "@/lib/jobs/limits";
 import type { GoogleSearchPreview } from "@/lib/search/google";
-import { primaryPersonFromText } from "@/lib/search/personSubject";
+import { resolveGoogleSubject } from "@/lib/search/resolveSubject";
 import { buildScenes, type SceneRecord } from "@/lib/jobs/scenes";
 import { generateMissingAiStills } from "@/lib/jobs/aiStills";
 import { balanceGoogleAiScenes, countSources } from "@/lib/jobs/balance";
@@ -259,14 +259,16 @@ export async function processJob(jobId: string): Promise<void> {
       await mapPartsParallel(packs, googleParts, async (shard, partIndex, partCount) => {
         await mapPool(shard, googlePerPart, async (pack) => {
           try {
+              const subj = resolveGoogleSubject(
+                pack.query,
+                pack.entityContext,
+              );
               previews[pack.query] = await searchGoogleImages(
                 pack.query,
                 PREVIEW_IMAGES_PER_QUERY,
                 {
-                  personName: primaryPersonFromText(
-                    pack.query,
-                    pack.entityContext,
-                  ),
+                  personName: subj.personName,
+                  placeName: subj.placeName,
                 },
               );
           } catch (err) {
@@ -381,13 +383,17 @@ function repickGoogleScenes(
     if (scene.visualSource !== "google" || !scene.query) return scene;
     const preview = previews[scene.query];
     if (!preview) return scene;
-    const personName = primaryPersonFromText(
+    const { personName, placeName } = resolveGoogleSubject(
       scene.words,
       scene.query,
       scene.subject,
       scene.entityContext,
     );
-    const hit = pickBestGoogleHit(preview, { usedUrls: used, personName });
+    const hit = pickBestGoogleHit(preview, {
+      usedUrls: used,
+      personName,
+      placeName,
+    });
     if (!hit?.imageUrl) {
       // Drop dirty Google miss → AI will fill
       return {
@@ -407,10 +413,12 @@ function repickGoogleScenes(
       thumbnailUrl: hit.thumbnailUrl || hit.imageUrl,
       sourceUrl: hit.sourcePageUrl || null,
       sourceDomain: hit.sourceDomain || null,
-      subject: personName || scene.subject,
-      why: personName
-        ? `${scene.why || "Google"} · single-person: ${personName}`
-        : scene.why,
+      subject: placeName || personName || scene.subject,
+      why: placeName
+        ? `${scene.why || "Google"} · place only (no people): ${placeName}`
+        : personName
+          ? `${scene.why || "Google"} · single-person: ${personName}`
+          : scene.why,
     };
   });
 }

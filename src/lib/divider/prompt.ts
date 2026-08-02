@@ -86,9 +86,12 @@ AI must look real, documentary, naturally imperfect — never fantasy glow / pro
 HARD BAN for AI visualIdea (never use these lazy props):
 - vacant / empty interview chairs, armchairs, empty seats
 - tabletop audio recorders, printed notes “between takes”, empty studio sets
+- people, faces, couples, weddings, tourists in place/object beats
 For abstract “serious / tension / pause” beats: use a real environmental still
 (place, weather, archive, landscape) — or better, assign GOOGLE to the named
 person in the film looking serious. Never an empty chair.
+For places (Lake Tahoe, parks, underwater): GOOGLE empty landscape / ROV gear only —
+never wedding or people stock. AI underwater stills = dark silt, ROV lights, no humans.
 
 ────────────────────────────────
 OUTPUT JSON ONLY

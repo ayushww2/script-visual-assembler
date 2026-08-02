@@ -3,7 +3,7 @@ import {
   pickBestGoogleHit,
   type GoogleSearchPreview,
 } from "@/lib/search/google";
-import { primaryPersonFromText } from "@/lib/search/personSubject";
+import { resolveGoogleSubject } from "@/lib/search/resolveSubject";
 import { countWords, getNiche } from "@/lib/niches";
 import { timeChunksAtWpm } from "@/lib/package/timing";
 
@@ -102,17 +102,18 @@ export function buildScenes(input: {
     const google = googleByBeat.get(beat.id);
     const ai = aiByBeat.get(beat.id);
     const preview = google ? input.previews?.[google.query] : undefined;
-    const personName = primaryPersonFromText(
+    const { personName, placeName } = resolveGoogleSubject(
       beat.text,
       google?.query,
       google?.entityContext,
     );
     // Exactly one clean landscape still per Google scene (no logo/text/watermark;
-    // if the beat is about one person, lock the pick to that person).
+    // person lock OR place lock with no people).
     const hit = google
       ? pickBestGoogleHit(preview, {
           usedUrls: usedGoogleUrls,
           personName,
+          placeName,
         })
       : null;
     if (hit?.imageUrl) usedGoogleUrls.add(hit.imageUrl);
@@ -146,11 +147,13 @@ export function buildScenes(input: {
         ...base,
         visualSource: "google" as const,
         query: google.query,
-        subject: personName || google.entityContext,
+        subject: placeName || personName || google.entityContext,
         entityContext: google.entityContext,
-        why: personName
-          ? `${google.whyGoogle} · single-person: ${personName}`
-          : google.whyGoogle,
+        why: placeName
+          ? `${google.whyGoogle} · place only (no people): ${placeName}`
+          : personName
+            ? `${google.whyGoogle} · single-person: ${personName}`
+            : google.whyGoogle,
         priority: google.priority,
         imageUrl: hit?.imageUrl ?? null,
         thumbnailUrl: hit?.thumbnailUrl ?? hit?.imageUrl ?? null,

@@ -8,7 +8,7 @@ import { queryFromNamedBeat } from "./namedEntity";
 
 /** Strong physical / documentary subjects that almost always have real photos. */
 const GOOGLEABLE =
-  /\b(tomb|tombs|grave|graves|sepulchre|sepulcher|rolling stone|limestone tomb|cave|burial chamber|stone chamber|jerusalem|golgotha|calvary|vatican|church|cathedral|manuscript|scroll|gospel book|bible manuscript|icon|mosaic|fresco|archaeolog(?:y|ical)|excavation|ruins|mount of olives|garden tomb|holy sepulchre|podcast studio|joe rogan|film set|movie set|premiere|red carpet|satellite map|roman soldier|roman guard|earthquake|temple curtain|wolf|wolves|yellowstone|elk|bison|coyote|predator|wildlife|reintroduction|national park|wolf pack|wolf hunt|delisting)\b/i;
+  /\b(tomb|tombs|grave|graves|sepulchre|sepulcher|rolling stone|limestone tomb|cave|burial chamber|stone chamber|jerusalem|golgotha|calvary|vatican|church|cathedral|manuscript|scroll|gospel book|bible manuscript|icon|mosaic|fresco|archaeolog(?:y|ical)|excavation|ruins|mount of olives|garden tomb|holy sepulchre|podcast studio|joe rogan|film set|movie set|premiere|red carpet|satellite map|roman soldier|roman guard|earthquake|temple curtain|wolf|wolves|yellowstone|elk|bison|coyote|predator|wildlife|reintroduction|national park|wolf pack|wolf hunt|delisting|lake tahoe|tahoe|rov|submersible|underwater|lakebed|bathymetr|sonar)\b/i;
 
 const PURE_ABSTRACT =
   /\b(tension|fear|legacy|belief|claim|serious|eyebrow|mystery|unseen battle|spiritual conflict|emotional|harder to film|deeper, darker|raising eyebrows)\b/i;
@@ -56,6 +56,11 @@ export function queryForGoogleableBeat(text: string): string {
   if (/\byellowstone\b/.test(lower)) return "yellowstone national park";
   if (/\belk\b/.test(lower)) return "yellowstone elk";
   if (/\bbison\b/.test(lower)) return "yellowstone bison";
+  if (/\btahoe\b/.test(lower) && /\b(underwater|beneath|deep|dark|rov|lakebed)\b/.test(lower)) {
+    return "Lake Tahoe underwater ROV";
+  }
+  if (/\btahoe\b/.test(lower)) return "Lake Tahoe aerial landscape";
+  if (/\b(rov|submersible)\b/.test(lower)) return "underwater ROV submarine";
   return queryFromNamedBeat(text) || text.split(/\s+/).slice(0, 4).join(" ").toLowerCase();
 }
 

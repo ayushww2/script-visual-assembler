@@ -4,13 +4,13 @@ import {
   pickBestGoogleHit,
   searchGoogleImages,
 } from "@/lib/search/google";
-import { primaryPersonFromText } from "@/lib/search/personSubject";
+import { resolveGoogleSubject } from "@/lib/search/resolveSubject";
 import { mapPool } from "@/lib/jobs/pool";
 
 export type RepairProgress = (message: string) => Promise<void> | void;
 
 /**
- * Re-search ONLY Google scenes that look like logos/text/watermarks/social thumbs.
+ * Re-search ONLY Google scenes that look like logos/text/watermarks/people-on-places.
  * Good scenes are left untouched.
  */
 export async function repairBadGoogleScenes(input: {
@@ -31,7 +31,7 @@ export async function repairBadGoogleScenes(input: {
   const used = new Set(
     out
       .filter((s) => s.imageUrl && !isBadGoogleScenePick(s))
-      .map((s) => s.imageUrl!) ,
+      .map((s) => s.imageUrl!),
   );
 
   let repaired = 0;
@@ -40,34 +40,44 @@ export async function repairBadGoogleScenes(input: {
   const concurrency = Math.max(1, input.concurrency ?? 8);
 
   await input.onProgress?.(
-    `Repairing ${badIndexes.length} dirty Google stills (logos/text/thumbs)…`,
+    `Repairing ${badIndexes.length} dirty Google stills (people/logos/thumbs)…`,
   );
 
   await mapPool(badIndexes, concurrency, async (idx) => {
     const scene = out[idx];
-    const personName = primaryPersonFromText(
+    const { personName, placeName } = resolveGoogleSubject(
       scene.words,
       scene.scriptText,
       scene.query,
       scene.subject,
       scene.entityContext,
     );
-    // Always search the full locked person name — never bare "Gibson".
-    const query = (
-      personName
-        ? personName
-        : scene.query ||
-          scene.subject ||
-          scene.words.split(/\s+/).slice(0, 4).join(" ")
+
+    let query = (
+      placeName
+        ? /\b(underwater|beneath|deep|dark|rov|lakebed)\b/i.test(
+            `${scene.words} ${scene.subject}`,
+          )
+          ? `${placeName} underwater`
+          : `${placeName} aerial landscape`
+        : personName
+          ? personName
+          : scene.query ||
+            scene.subject ||
+            scene.words.split(/\s+/).slice(0, 4).join(" ")
     )
       .replace(/\bgibson\b/gi, "Mel Gibson")
       .trim() || "documentary photo";
 
     try {
-      const preview = await searchGoogleImages(query, 16, { personName });
+      const preview = await searchGoogleImages(query, 16, {
+        personName,
+        placeName,
+      });
       const hit = pickBestGoogleHit(preview, {
         usedUrls: used,
         personName,
+        placeName,
       });
       if (!hit?.imageUrl) {
         failed += 1;
@@ -77,7 +87,7 @@ export async function repairBadGoogleScenes(input: {
           ...scene,
           visualSource: "google",
           query,
-          subject: personName || scene.subject,
+          subject: placeName || personName || scene.subject,
           imageUrl: hit.imageUrl,
           thumbnailUrl: hit.thumbnailUrl || hit.imageUrl,
           sourceUrl: hit.sourcePageUrl || null,
@@ -86,9 +96,12 @@ export async function repairBadGoogleScenes(input: {
             .map((r) => r.imageUrl)
             .filter(Boolean)
             .slice(0, 8),
-          why: personName
-            ? `Repaired clean Google · single-person: ${personName}`
-            : "Repaired clean Google (no logo/text/watermark)",
+          why: placeName
+            ? `Repaired clean Google · place only (no people): ${placeName}`
+            : personName
+              ? `Repaired clean Google · single-person: ${personName}`
+              : "Repaired clean Google (no logo/text/watermark)",
+          r2Url: null,
         };
         repaired += 1;
       }

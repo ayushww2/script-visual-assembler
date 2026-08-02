@@ -171,8 +171,12 @@ export function composeMysteryImagePrompt(input: {
     "Real human-captured field / archive / lab / shoreline still, slightly imperfect: natural grain, soft optics, mild haze, uneven exposure.",
     "Natural daylight or overcast documentary light. Realistic materials and scale. Functional framing, not poster composition.",
     "Never show empty interview chairs, vacant armchairs, tabletop recorders, or staged empty studio sets.",
+    "Never show people, faces, couples, weddings, tourists, or readable watermarks/logos.",
+    title && /tahoe|rov|underwater|terrifying/i.test(title)
+      ? "Mood: dark deep-water ROV documentary tension — murky depths, artificial lights, silt, unknown shapes; no people."
+      : "",
     MYSTERY_REALISM_LOCK,
-    `Avoid: ${MYSTERY_DEFAULT_NEGATIVE}`,
+    `Avoid: ${MYSTERY_DEFAULT_NEGATIVE}, people, faces, wedding, couple, tourist, watermark, logo`,
   ]
     .filter(Boolean)
     .join(" ");
