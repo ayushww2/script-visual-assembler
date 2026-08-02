@@ -128,6 +128,7 @@ export async function processJob(jobId: string): Promise<void> {
         if (misplacedAi > 0) {
           const converted = await repairMisplacedAiToGoogle({
             scenes,
+            title: job.title,
             onProgress,
           });
           scenes = converted.scenes;

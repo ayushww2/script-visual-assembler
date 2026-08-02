@@ -12,16 +12,21 @@ import { mapPool } from "@/lib/jobs/pool";
 
 export type RepairProgress = (message: string) => Promise<void> | void;
 
+/** Fake paperwork / clipboard AI props — prefer real wildlife photos. */
+const DOC_CLICHE =
+  /\b(clipboard|incident form|wildlife report|case file|board agenda|population chart|typed report|printed form|stamped (wildlife|case)|government wildlife report|manila folder|filing)\b/i;
+
 /**
- * AI scenes that should have been Google (tombs, sites, etc.).
- * Scans subject + spoken words only — not AI why/entityContext essays
- * (those often invent chamber metaphors for abstract beats).
+ * AI scenes that should have been Google (tombs, wolves, sites, etc.).
+ * Scans subject + spoken words; also catches raw-document AI props.
  */
 export function isMisplacedAiScene(scene: SceneRecord): boolean {
   if (scene.visualSource !== "ai") return false;
   if (!scene.imageUrl?.trim()) return false;
   const scan = [scene.subject, scene.words, scene.query].filter(Boolean).join(" ");
-  return beatLooksGoogleable(scan);
+  if (beatLooksGoogleable(scan)) return true;
+  const idea = [scene.entityContext, scene.subject].filter(Boolean).join(" ");
+  return DOC_CLICHE.test(idea);
 }
 
 /**
@@ -30,6 +35,7 @@ export function isMisplacedAiScene(scene: SceneRecord): boolean {
  */
 export async function repairMisplacedAiToGoogle(input: {
   scenes: SceneRecord[];
+  title?: string | null;
   onProgress?: RepairProgress;
   concurrency?: number;
 }): Promise<{ scenes: SceneRecord[]; repaired: number; failed: number }> {
@@ -58,7 +64,7 @@ export async function repairMisplacedAiToGoogle(input: {
 
   await mapPool(indexes, concurrency, async (idx) => {
     const scene = out[idx];
-    const scan = [scene.subject, scene.words, scene.query]
+    const scan = [scene.subject, scene.words, scene.query, input.title]
       .filter(Boolean)
       .join(" ");
     const personName = primaryPersonFromText(
@@ -67,10 +73,12 @@ export async function repairMisplacedAiToGoogle(input: {
       scene.subject,
       scene.query,
     );
+    const idea = [scene.entityContext, scene.subject].filter(Boolean).join(" ");
     const query = (
       personName
         ? personName
         : queryForGoogleableBeat(scan) ||
+          (DOC_CLICHE.test(idea) ? "yellowstone gray wolf" : "") ||
           scene.subject ||
           scene.words.split(/\s+/).slice(0, 4).join(" ")
     ).trim();

@@ -8,7 +8,7 @@ import { queryFromNamedBeat } from "./namedEntity";
 
 /** Strong physical / documentary subjects that almost always have real photos. */
 const GOOGLEABLE =
-  /\b(tomb|tombs|grave|graves|sepulchre|sepulcher|rolling stone|limestone tomb|cave|burial chamber|stone chamber|jerusalem|golgotha|calvary|vatican|church|cathedral|manuscript|scroll|gospel book|bible manuscript|icon|mosaic|fresco|archaeolog(?:y|ical)|excavation|ruins|mount of olives|garden tomb|holy sepulchre|podcast studio|joe rogan|film set|movie set|premiere|red carpet|satellite map|roman soldier|roman guard|earthquake|temple curtain|golgotha|calvary)\b/i;
+  /\b(tomb|tombs|grave|graves|sepulchre|sepulcher|rolling stone|limestone tomb|cave|burial chamber|stone chamber|jerusalem|golgotha|calvary|vatican|church|cathedral|manuscript|scroll|gospel book|bible manuscript|icon|mosaic|fresco|archaeolog(?:y|ical)|excavation|ruins|mount of olives|garden tomb|holy sepulchre|podcast studio|joe rogan|film set|movie set|premiere|red carpet|satellite map|roman soldier|roman guard|earthquake|temple curtain|wolf|wolves|yellowstone|elk|bison|coyote|predator|wildlife|reintroduction|national park|wolf pack|wolf hunt|delisting)\b/i;
 
 const PURE_ABSTRACT =
   /\b(tension|fear|legacy|belief|claim|serious|eyebrow|mystery|unseen battle|spiritual conflict|emotional|harder to film|deeper, darker|raising eyebrows)\b/i;
@@ -46,6 +46,16 @@ export function queryForGoogleableBeat(text: string): string {
   if (/\broman (soldier|guard)\b/.test(lower)) return "roman soldier ancient";
   if (/\bpodcast\b|\brogan\b/.test(lower)) return "joe rogan experience studio";
   if (/\bearthquake\b/.test(lower)) return "jerusalem earthquake ruins";
+  if (/\byellowstone\b/.test(lower) && /\b(wolf|wolves|pack)\b/.test(lower)) {
+    return "yellowstone wolves";
+  }
+  if (/\b(wolf|wolves)\b/.test(lower) && /\b(hunt|hunting|hunter)\b/.test(lower)) {
+    return "wolf hunting montana wyoming";
+  }
+  if (/\b(wolf|wolves|wolf pack)\b/.test(lower)) return "yellowstone gray wolf";
+  if (/\byellowstone\b/.test(lower)) return "yellowstone national park";
+  if (/\belk\b/.test(lower)) return "yellowstone elk";
+  if (/\bbison\b/.test(lower)) return "yellowstone bison";
   return queryFromNamedBeat(text) || text.split(/\s+/).slice(0, 4).join(" ").toLowerCase();
 }
 
