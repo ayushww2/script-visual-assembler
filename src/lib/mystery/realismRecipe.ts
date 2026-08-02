@@ -9,20 +9,22 @@ export const MYSTERY_IMAGE_QUALITY = "low" as const;
 
 /** Short locked aesthetic the prompt engineer must obey. */
 export const MYSTERY_REALISM_LOCK = `
-MYSTERY REALISM LOCK (mandatory):
+MYSTERY REALISM LOCK (mandatory — tight photographic realism):
 - Landscape / wide documentary still only (16:9 framing intent).
-- Must look like a real human-captured photograph or archive/lab/field still — NOT AI art.
+- Must look like a real human-captured photograph or archive/lab/field still — NOT AI art, NOT illustration.
+- Photoreal anatomy and materials only: correct animal/human proportions, natural limbs, believable fur/skin/rock.
 - Bright and clear enough to read the subject, but slightly imperfect: natural grain, soft optics,
   mild haze, uneven exposure, functional framing (not poster composition).
 - Prefer: field investigation, archaeological dig, sinkhole/shoreline geology, underwater exploration,
-  manuscript/lab scan, declassified archive, CCTV/drone frame when style requests it.
+  manuscript/lab scan, declassified archive, wildlife / trail-camera frame, CCTV/drone when style asks.
 - Lighting: natural daylight, overcast documentary light, or single functional flashlight underwater —
   never glossy cinematic grade, never teal-and-orange trailer look.
 - Texture: porous rock, salt crust, silt, marine snow/backscatter, film grain, compression softness.
 - Reveal clues stay subtle and physical (water seepage, footprint, dark void, beam on rock) —
   never fake official stamps, logos, readable forged documents, or HUD overlays.
 - Forbidden: perfect symmetry, crystal CGI, beauty retouch, fantasy glow, meme text, watermarks,
-  stock-model posing, oversaturated fantasy colors.
+  stock-model posing, oversaturated fantasy colors, deformed anatomy, extra limbs, melted faces,
+  plastic CGI skin, cartoon animals, family photoshoot, wedding portrait, tourist selfie, studio backdrop.
 `.trim();
 
 export const MYSTERY_DEFAULT_NEGATIVE = [
@@ -33,6 +35,7 @@ export const MYSTERY_DEFAULT_NEGATIVE = [
   "perfect symmetry",
   "clean CGI",
   "3D render look",
+  "Unreal Engine",
   "fantasy effects",
   "neon glow",
   "readable fake text",
@@ -45,8 +48,15 @@ export const MYSTERY_DEFAULT_NEGATIVE = [
   "beauty retouch",
   "oversaturated colors",
   "plastic skin",
+  "waxy skin",
   "distorted hands",
   "distorted faces",
+  "deformed anatomy",
+  "extra limbs",
+  "extra fingers",
+  "melted features",
+  "mutated animal",
+  "cartoon animal",
   "illegible gibberish typography",
   "empty interview chair",
   "vacant armchair",
@@ -57,4 +67,11 @@ export const MYSTERY_DEFAULT_NEGATIVE = [
   "tabletop audio recorder prop",
   "printed notes on table cliché",
   "empty studio set between takes",
+  "family photoshoot",
+  "bluebonnet family portrait",
+  "wedding couple",
+  "tourist selfie",
+  "studio backdrop",
+  "sepia cowboy portrait",
+  "headshot",
 ].join(", ");

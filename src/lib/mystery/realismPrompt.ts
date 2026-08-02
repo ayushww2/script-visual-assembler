@@ -34,9 +34,11 @@ old B&W archive ruins, lab/manuscript scan when asked — all landscape-capable,
 
 Rules:
 - Write prompts for LANDSCAPE photography (wide). Prefer 16:9.
+- Maximize photographic realism: correct anatomy, natural materials, believable scale — reject CGI plastic look.
 - Make images bright/clear enough to read, yet real and slightly imperfect — not crystal-perfect CGI.
 - Never invent logos, seals, readable fake documents, timestamps, or HUD text.
 - Never write generic cinematic trailer language.
+- Never request portraits, family shoots, weddings, tourist selfies, or studio backdrops unless the idea is explicitly that evidence.
 - Output JSON only with keys:
   detailedImagePrompt (one paste-ready paragraph),
   negativePrompt (comma list, specific to this idea),
@@ -68,8 +70,8 @@ export async function engineerMysteryRealismPrompt(
           intendedUse: input.intendedUse || "evidence still",
           preferredStyle: input.preferredStyle || "color documentary",
           aspectRatio: "16:9",
-          realismLevel: "very realistic",
-          note: "Landscape still only. Maximize photographic realism with slight human imperfection.",
+          realismLevel: "ultra realistic photograph",
+          note: "Landscape still only. Photoreal documentary capture with correct anatomy and slight human imperfection. No CGI, no deformed animals/people.",
         }),
       },
     ],
@@ -163,20 +165,22 @@ export function composeMysteryImagePrompt(input: {
   const title = (input.title || "").trim();
 
   return [
-    "Documentary photograph, landscape 16:9 evidence still.",
+    "Ultra-realistic documentary photograph, landscape 16:9 evidence still, real camera capture.",
     title ? `Episode context: ${title}.` : "",
     `Primary subject: ${idea}.`,
     subject && subject !== idea ? `Named subject: ${subject}.` : "",
     words ? `Narration cue (do not render as text): ${words}` : "",
-    "Real human-captured field / archive / lab / shoreline still, slightly imperfect: natural grain, soft optics, mild haze, uneven exposure.",
-    "Natural daylight or overcast documentary light. Realistic materials and scale. Functional framing, not poster composition.",
+    "Photoreal field / archive / lab / shoreline / wildlife still with correct anatomy and materials.",
+    "Slightly imperfect: natural grain, soft optics, mild haze, uneven exposure — never plastic CGI.",
+    "Natural daylight or overcast documentary light. Believable scale. Functional framing, not poster composition.",
     "Never show empty interview chairs, vacant armchairs, tabletop recorders, or staged empty studio sets.",
-    "Never show people, faces, couples, weddings, tourists, or readable watermarks/logos.",
+    "Never show portraits, couples, weddings, family photoshoots, tourists, or readable watermarks/logos.",
+    "Never deform animals or people: no extra limbs, melted faces, oversized ears, cartoon proportions.",
     title && /tahoe|rov|underwater|terrifying/i.test(title)
       ? "Mood: dark deep-water ROV documentary tension — murky depths, artificial lights, silt, unknown shapes; no people."
       : "",
     MYSTERY_REALISM_LOCK,
-    `Avoid: ${MYSTERY_DEFAULT_NEGATIVE}, people, faces, wedding, couple, tourist, watermark, logo`,
+    `Avoid: ${MYSTERY_DEFAULT_NEGATIVE}, people, faces, wedding, couple, tourist, watermark, logo, deformed anatomy`,
   ]
     .filter(Boolean)
     .join(" ");

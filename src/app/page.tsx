@@ -9,6 +9,13 @@ import {
   type DragEvent,
   type ReactNode,
 } from "react";
+import {
+  estimateJobCosts,
+  formatUsd,
+  GPT_IMAGE2_BATCH_USD,
+  GPT_IMAGE2_REALTIME_USD,
+  type JobCostEstimate,
+} from "@/lib/jobs/costEstimate";
 
 type NavKey = "new" | "jobs" | "queue";
 
@@ -36,6 +43,7 @@ type JobListItem = {
   title: string | null;
   niche: string;
   status: string;
+  phase?: string;
   beatCount: number;
   sceneCount: number;
   googleCount: number;
@@ -180,6 +188,7 @@ export default function Home() {
   const [title, setTitle] = useState("");
   const [niche, setNiche] = useState("mystery");
   const [aiBatch, setAiBatch] = useState(false);
+  const [forceAllAi, setForceAllAi] = useState(false);
   const [jobs, setJobs] = useState<JobListItem[]>([]);
   const [capacity, setCapacity] = useState<Capacity | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -223,6 +232,37 @@ export default function Home() {
         .filter((url): url is string => Boolean(url)),
     [selectedPackageIds, packageJobsById],
   );
+
+  const submitEstimates = useMemo(() => {
+    const mode = forceAllAi ? "ai-only" : "google-first";
+    if (batchFiles.length > 0) {
+      return batchFiles.map((f) => ({
+        title: f.title,
+        estimate: estimateJobCosts({ script: f.script, mode }),
+      }));
+    }
+    if (!script.trim()) return [] as Array<{ title: string; estimate: JobCostEstimate }>;
+    return [
+      {
+        title: title.trim() || "Untitled",
+        estimate: estimateJobCosts({ script, mode }),
+      },
+    ];
+  }, [batchFiles, script, title, forceAllAi]);
+
+  const submitTotals = useMemo(() => {
+    const scenes = submitEstimates.reduce((n, e) => n + e.estimate.scenes, 0);
+    const aiStills = submitEstimates.reduce(
+      (n, e) => n + e.estimate.aiStills,
+      0,
+    );
+    return {
+      scenes,
+      aiStills,
+      realtimeUsd: aiStills * GPT_IMAGE2_REALTIME_USD,
+      batchUsd: aiStills * GPT_IMAGE2_BATCH_USD,
+    };
+  }, [submitEstimates]);
 
   const loadJobs = useCallback(async () => {
     const res = await fetch("/api/jobs");
@@ -407,7 +447,8 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             niche,
-            phase: "google-first",
+            phase: forceAllAi ? "ai-only" : "google-first",
+            forceAllAi,
             aiBatch,
             jobs: batchFiles.map((f) => ({
               script: f.script,
@@ -428,6 +469,7 @@ export default function Home() {
         setTitle("");
         setNiche("mystery");
         setAiBatch(false);
+        setForceAllAi(false);
         setDocxName(null);
         setSelectedId(null);
         setDetail(null);
@@ -451,7 +493,8 @@ export default function Home() {
           script,
           title: title.trim() || undefined,
           niche,
-          phase: "google-first",
+          phase: forceAllAi ? "ai-only" : "google-first",
+          forceAllAi,
           aiBatch,
         }),
       });
@@ -465,6 +508,7 @@ export default function Home() {
       setTitle("");
       setNiche("mystery");
       setAiBatch(false);
+      setForceAllAi(false);
       setDocxName(null);
       setBatchFiles([]);
       setSelectedId(null);
@@ -759,25 +803,107 @@ export default function Home() {
                 )}
               </Panel>
 
-              <Panel title="AI image pricing">
-                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-4 py-4">
-                  <input
-                    type="checkbox"
-                    checked={aiBatch}
-                    onChange={(e) => setAiBatch(e.target.checked)}
-                    className="mt-1 h-4 w-4 accent-[var(--blue)]"
-                  />
-                  <span>
-                    <span className="block text-sm font-semibold text-white">
-                      OpenAI Batch API — 50% cheaper
+              <Panel title="Visual mode & AI pricing">
+                <div className="space-y-3">
+                  <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-4 py-4">
+                    <input
+                      type="checkbox"
+                      checked={forceAllAi}
+                      onChange={(e) => setForceAllAi(e.target.checked)}
+                      className="mt-1 h-4 w-4 accent-[var(--blue)]"
+                    />
+                    <span>
+                      <span className="block text-sm font-semibold text-white">
+                        Make it all AI
+                      </span>
+                      <span className="mt-1 block text-sm leading-relaxed text-[var(--ink-soft)]">
+                        Skip Google Images. Every scene is gpt-image-2 with the
+                        tightened Mystery realism filter. Best when you want a
+                        fully generated look — costs scale with scene count.
+                      </span>
                     </span>
-                    <span className="mt-1 block text-sm leading-relaxed text-[var(--ink-soft)]">
-                      Same gpt-image-2 quality. AI stills are queued as a batch
-                      instead of realtime. Can take up to 24 hours. Leave off for
-                      the fast (~10 min) path.
+                  </label>
+
+                  <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-4 py-4">
+                    <input
+                      type="checkbox"
+                      checked={aiBatch}
+                      onChange={(e) => setAiBatch(e.target.checked)}
+                      className="mt-1 h-4 w-4 accent-[var(--blue)]"
+                    />
+                    <span>
+                      <span className="block text-sm font-semibold text-white">
+                        OpenAI Batch API — 50% cheaper
+                      </span>
+                      <span className="mt-1 block text-sm leading-relaxed text-[var(--ink-soft)]">
+                        Same gpt-image-2 quality. AI stills are queued as a batch
+                        instead of realtime. Can take up to 24 hours. Leave off for
+                        the fast path.
+                      </span>
                     </span>
-                  </span>
-                </label>
+                  </label>
+
+                  {submitEstimates.length > 0 ? (
+                    <div className="rounded-xl border border-[rgba(96,165,250,0.28)] bg-[rgba(59,130,246,0.08)] px-4 py-4">
+                      <p className="text-xs font-semibold tracking-[0.16em] text-[var(--blue-bright)] uppercase">
+                        Estimate
+                        {forceAllAi ? " · all AI" : " · Google-first"}
+                        {aiBatch ? " · Batch pricing" : " · realtime pricing"}
+                      </p>
+                      <div className="mt-3 space-y-2">
+                        {submitEstimates.map((row, i) => (
+                          <div
+                            key={`${row.title}-${i}`}
+                            className="flex flex-wrap items-baseline justify-between gap-2 text-sm"
+                          >
+                            <span className="min-w-0 truncate font-medium text-white">
+                              {row.title || `Job ${i + 1}`}
+                            </span>
+                            <span className="text-[var(--ink-soft)]">
+                              {row.estimate.scenes} scenes · ~
+                              {row.estimate.aiStills} AI ·{" "}
+                              {formatUsd(
+                                aiBatch
+                                  ? row.estimate.batchUsd
+                                  : row.estimate.realtimeUsd,
+                              )}
+                              {!aiBatch ? (
+                                <span className="text-[var(--ink-soft)]/70">
+                                  {" "}
+                                  (batch {formatUsd(row.estimate.batchUsd)})
+                                </span>
+                              ) : (
+                                <span className="text-[var(--ink-soft)]/70">
+                                  {" "}
+                                  (realtime {formatUsd(row.estimate.realtimeUsd)})
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      {submitEstimates.length > 1 ? (
+                        <p className="mt-3 border-t border-[var(--line)] pt-3 text-sm font-semibold text-white">
+                          Total · {submitTotals.scenes} scenes · ~
+                          {submitTotals.aiStills} AI ·{" "}
+                          {formatUsd(
+                            aiBatch
+                              ? submitTotals.batchUsd
+                              : submitTotals.realtimeUsd,
+                          )}
+                        </p>
+                      ) : null}
+                      <p className="mt-2 text-[11px] text-[var(--ink-soft)]">
+                        gpt-image-2 low @ {formatUsd(GPT_IMAGE2_REALTIME_USD)}
+                        /image realtime · {formatUsd(GPT_IMAGE2_BATCH_USD)}
+                        /image batch.
+                        {!forceAllAi
+                          ? ` Google-first AI estimate ~28% of scenes (cap ${submitEstimates[0]?.estimate.aiCap ?? 100}).`
+                          : " All-AI = 1 image per scene."}
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
               </Panel>
 
               <button
@@ -792,15 +918,17 @@ export default function Home() {
               >
                 {submitting
                   ? "Submitting…"
-                  : batchFiles.length > 1
-                    ? `Queue ${batchFiles.length} jobs`
-                    : batchFiles.length === 1
-                      ? aiBatch
-                        ? "Submit job (Batch / 50% off)"
-                        : "Submit job"
-                      : aiBatch
-                        ? "Submit job (Batch / 50% off)"
-                        : "Submit job"}
+                  : (() => {
+                      const n =
+                        batchFiles.length > 1
+                          ? `Queue ${batchFiles.length} jobs`
+                          : "Submit job";
+                      const tags = [
+                        forceAllAi ? "all AI" : null,
+                        aiBatch ? "Batch / 50% off" : null,
+                      ].filter(Boolean);
+                      return tags.length ? `${n} (${tags.join(" · ")})` : n;
+                    })()}
               </button>
 
               {error ? (
@@ -835,6 +963,8 @@ export default function Home() {
                       googleCount={job.googleCount}
                       aiCount={job.aiCount}
                       sceneCount={job.sceneCount}
+                      aiBatch={job.aiBatch}
+                      phase={job.phase}
                     />
                     <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
                       <div>
@@ -993,6 +1123,8 @@ export default function Home() {
                                         googleCount={job.googleCount}
                                         aiCount={job.aiCount}
                                         sceneCount={job.sceneCount}
+                                        aiBatch={job.aiBatch}
+                                        phase={job.phase}
                                       />
                                       <div className="flex w-full items-center gap-4">
                                         <div className="min-w-0 flex-1">
@@ -1076,24 +1208,48 @@ function JobBudgetBar({
   googleCount,
   aiCount,
   sceneCount,
+  aiBatch,
+  phase,
 }: {
   googleCount?: number | null;
   aiCount?: number | null;
   sceneCount?: number | null;
+  aiBatch?: boolean | null;
+  phase?: string | null;
 }) {
   const g = googleCount ?? 0;
   const a = aiCount ?? 0;
   const s = sceneCount ?? 0;
+  const realtime = a * GPT_IMAGE2_REALTIME_USD;
+  const batch = a * GPT_IMAGE2_BATCH_USD;
   return (
     <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold tracking-wide">
-      <span className="rounded-md border border-[rgba(96,165,250,0.35)] bg-[rgba(59,130,246,0.14)] px-2 py-0.5 text-[var(--blue-bright)]">
-        {g} Google queries
-      </span>
+      {phase === "ai-only" ? (
+        <span className="rounded-md border border-[rgba(251,191,36,0.35)] bg-[rgba(251,191,36,0.12)] px-2 py-0.5 text-amber-200">
+          all AI
+        </span>
+      ) : (
+        <span className="rounded-md border border-[rgba(96,165,250,0.35)] bg-[rgba(59,130,246,0.14)] px-2 py-0.5 text-[var(--blue-bright)]">
+          {g} Google queries
+        </span>
+      )}
       <span className="rounded-md border border-[rgba(52,211,153,0.3)] bg-[rgba(52,211,153,0.1)] px-2 py-0.5 text-[var(--ok)]">
         {a} AI images
       </span>
       {s > 0 ? (
         <span className="text-[var(--ink-soft)]">{s} scenes</span>
+      ) : null}
+      {a > 0 ? (
+        <span className="rounded-md border border-[var(--line)] px-2 py-0.5 text-[var(--ink-soft)]">
+          {aiBatch
+            ? `est. batch ${formatUsd(batch)}`
+            : `est. ${formatUsd(realtime)}`}
+          {aiBatch ? (
+            <span className="opacity-70"> · rt {formatUsd(realtime)}</span>
+          ) : (
+            <span className="opacity-70"> · batch {formatUsd(batch)}</span>
+          )}
+        </span>
       ) : null}
     </div>
   );
@@ -1189,6 +1345,8 @@ function JobDetailView({
             googleCount={detail.googleCount}
             aiCount={detail.aiCount}
             sceneCount={detail.sceneCount || scenes.length}
+            aiBatch={detail.aiBatch}
+            phase={detail.phase}
           />
           <p className="mt-3 text-xs font-semibold tracking-[0.18em] text-[var(--blue-bright)] uppercase">
             {statusLabel(detail.status)}

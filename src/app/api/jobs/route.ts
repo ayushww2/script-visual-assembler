@@ -41,13 +41,15 @@ export async function POST(req: Request) {
       script?: string;
       title?: string;
       niche?: string;
-      phase?: "google-first" | "full";
+      phase?: "google-first" | "full" | "ai-only";
       /** Total VO length in seconds (e.g. 1575 for 26:15). Scene times rescale to fit. */
       voiceoverDurationSec?: number;
       /** Optional "MM:SS" or "H:MM:SS" shorthand. */
       voiceoverDuration?: string;
       /** OpenAI Batch API for AI stills — ~50% cheaper, up to 24h. */
       aiBatch?: boolean;
+      /** Skip Google — every scene is gpt-image-2. */
+      forceAllAi?: boolean;
     };
 
     const script = body.script?.trim();
@@ -64,8 +66,14 @@ export async function POST(req: Request) {
       );
     }
 
+    const phase: "google-first" | "full" | "ai-only" = body.forceAllAi
+      ? "ai-only"
+      : body.phase === "ai-only" || body.phase === "full"
+        ? body.phase
+        : "google-first";
+
     const usedToday = await countTodaysPreviewQueries();
-    if (usedToday >= DAILY_QUERY_SOFT_LIMIT) {
+    if (!body.forceAllAi && phase !== "ai-only" && usedToday >= DAILY_QUERY_SOFT_LIMIT) {
       return NextResponse.json(
         {
           error: `Daily Google query soft limit reached (${DAILY_QUERY_SOFT_LIMIT}). Try again tomorrow.`,
@@ -90,11 +98,15 @@ export async function POST(req: Request) {
         title: body.title?.trim() || deriveJobTitle(script),
         niche,
         script,
-        phase: body.phase || "google-first",
+        phase,
         status: "queued",
-        progress: aiBatch
-          ? "Queued — AI Batch mode (50% cheaper, up to 24h)…"
-          : "Queued — cloud worker will claim shortly…",
+        progress: phase === "ai-only"
+          ? aiBatch
+            ? "Queued — all AI · Batch mode (50% off, up to 24h)…"
+            : "Queued — all AI · realtime gpt-image-2…"
+          : aiBatch
+            ? "Queued — AI Batch mode (50% cheaper, up to 24h)…"
+            : "Queued — cloud worker will claim shortly…",
         voiceoverDurationSec,
         aiBatch,
       },

@@ -80,7 +80,7 @@ async function runDirectorBatch(input: {
 
 export async function runScriptDivider(input: {
   script: string;
-  phase?: "google-first" | "full";
+  phase?: "google-first" | "full" | "ai-only";
   niche?: string | null;
 }): Promise<{
   beats: Beat[];
@@ -94,6 +94,28 @@ export async function runScriptDivider(input: {
   }
 
   const phase = input.phase ?? "google-first";
+
+  // All-AI mode: skip director Google packs — every beat is an AI still.
+  if (phase === "ai-only") {
+    return {
+      beats,
+      result: {
+        googleSearches: [],
+        aiGenerate: beats.map((beat) => ({
+          subject:
+            beat.text.split(/\s+/).filter(Boolean).slice(0, 6).join(" ") ||
+            "scene",
+          visualIdea: `documentary realism evidence still for: ${beat.text}`,
+          whyAiNotGoogle: "all-AI mode",
+          relatedBeatIds: [beat.id],
+          priority: 80,
+        })),
+      },
+      model: "all-ai",
+      usage: { inputTokens: 0, outputTokens: 0 },
+    };
+  }
+
   const batches: Beat[][] = [];
   for (let i = 0; i < beats.length; i += DIRECTOR_BATCH_SIZE) {
     batches.push(beats.slice(i, i + DIRECTOR_BATCH_SIZE));

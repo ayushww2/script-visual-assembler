@@ -192,12 +192,16 @@ export async function processJob(jobId: string): Promise<void> {
         return;
       }
 
+      const allAi = job.phase === "ai-only";
+
       await prisma.job.update({
         where: { id: jobId },
         data: {
           status: "running",
           startedAt: job.startedAt ?? new Date(),
-          progress: "Reading script and building Google packs…",
+          progress: allAi
+            ? "All-AI mode — building scene list…"
+            : "Reading script and building Google packs…",
           error: null,
           packageReady: false,
           packageUrl: null,
@@ -208,7 +212,8 @@ export async function processJob(jobId: string): Promise<void> {
 
       const divided = await runScriptDivider({
         script: job.script,
-        phase: (job.phase as "google-first" | "full") || "google-first",
+        phase:
+          (job.phase as "google-first" | "full" | "ai-only") || "google-first",
         niche: job.niche,
       });
 
@@ -223,7 +228,9 @@ export async function processJob(jobId: string): Promise<void> {
           resultJson: divided.result as unknown as Prisma.InputJsonValue,
           usageJson: (divided.usage ??
             undefined) as unknown as Prisma.InputJsonValue | undefined,
-          progress: `Previewing ${divided.result.googleSearches.length} Google queries…`,
+          progress: allAi
+            ? `All-AI · ${divided.beats.length} scenes → gpt-image-2…`
+            : `Previewing ${divided.result.googleSearches.length} Google queries…`,
         },
       });
 
@@ -232,63 +239,69 @@ export async function processJob(jobId: string): Promise<void> {
         .slice()
         .sort((a, b) => b.priority - a.priority);
 
-      // Split Google packs into PARALLEL_PARTS and run every part at once.
-      const googleParts = PARALLEL_PARTS;
-      const googlePerPart = Math.max(
-        1,
-        Math.ceil(GOOGLE_SEARCH_CONCURRENCY / googleParts),
-      );
-      let googleDone = 0;
-      let googleProgressAt = 0;
+      if (packs.length > 0) {
+        // Split Google packs into PARALLEL_PARTS and run every part at once.
+        const googleParts = PARALLEL_PARTS;
+        const googlePerPart = Math.max(
+          1,
+          Math.ceil(GOOGLE_SEARCH_CONCURRENCY / googleParts),
+        );
+        let googleDone = 0;
+        let googleProgressAt = 0;
 
-      await prisma.job.update({
-        where: { id: jobId },
-        data: {
-          progress: `Google ×${googleParts} parts · ${packs.length} queries…`,
-        },
-      });
-
-      await mapPartsParallel(packs, googleParts, async (shard, partIndex, partCount) => {
-        await mapPool(shard, googlePerPart, async (pack) => {
-          try {
-              const subj = resolveGoogleSubject(
-                pack.query,
-                pack.entityContext,
-              );
-              previews[pack.query] = await searchGoogleImages(
-                pack.query,
-                PREVIEW_IMAGES_PER_QUERY,
-                {
-                  personName: subj.personName,
-                  placeName: subj.placeName,
-                },
-              );
-          } catch (err) {
-            previews[pack.query] = {
-              query: pack.query,
-              provider: "searchapi_google_images",
-              results: [],
-              filteredOut: 0,
-              error: err instanceof Error ? err.message : "Search failed",
-            };
-          }
-          googleDone += 1;
-          const now = Date.now();
-          if (
-            googleDone === packs.length ||
-            googleDone === 1 ||
-            now - googleProgressAt >= 2_000
-          ) {
-            googleProgressAt = now;
-            await prisma.job.update({
-              where: { id: jobId },
-              data: {
-                progress: `Google ×${partCount} parts · ${googleDone}/${packs.length} (part ${partIndex + 1})…`,
-              },
-            });
-          }
+        await prisma.job.update({
+          where: { id: jobId },
+          data: {
+            progress: `Google ×${googleParts} parts · ${packs.length} queries…`,
+          },
         });
-      });
+
+        await mapPartsParallel(
+          packs,
+          googleParts,
+          async (shard, partIndex, partCount) => {
+            await mapPool(shard, googlePerPart, async (pack) => {
+              try {
+                const subj = resolveGoogleSubject(
+                  pack.query,
+                  pack.entityContext,
+                );
+                previews[pack.query] = await searchGoogleImages(
+                  pack.query,
+                  PREVIEW_IMAGES_PER_QUERY,
+                  {
+                    personName: subj.personName,
+                    placeName: subj.placeName,
+                  },
+                );
+              } catch (err) {
+                previews[pack.query] = {
+                  query: pack.query,
+                  provider: "searchapi_google_images",
+                  results: [],
+                  filteredOut: 0,
+                  error: err instanceof Error ? err.message : "Search failed",
+                };
+              }
+              googleDone += 1;
+              const now = Date.now();
+              if (
+                googleDone === packs.length ||
+                googleDone === 1 ||
+                now - googleProgressAt >= 2_000
+              ) {
+                googleProgressAt = now;
+                await prisma.job.update({
+                  where: { id: jobId },
+                  data: {
+                    progress: `Google ×${partCount} parts · ${googleDone}/${packs.length} (part ${partIndex + 1})…`,
+                  },
+                });
+              }
+            });
+          },
+        );
+      }
 
       let scenes = buildScenes({
         beats: divided.beats,

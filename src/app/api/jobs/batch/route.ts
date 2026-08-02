@@ -39,14 +39,16 @@ export async function POST(req: Request) {
         script?: string;
         title?: string;
         niche?: string;
-        phase?: "google-first" | "full";
+        phase?: "google-first" | "full" | "ai-only";
         voiceoverDurationSec?: number;
         voiceoverDuration?: string;
         aiBatch?: boolean;
+        forceAllAi?: boolean;
       }>;
       niche?: string;
       aiBatch?: boolean;
-      phase?: "google-first" | "full";
+      forceAllAi?: boolean;
+      phase?: "google-first" | "full" | "ai-only";
     };
 
     const items = Array.isArray(body.jobs) ? body.jobs : [];
@@ -63,8 +65,15 @@ export async function POST(req: Request) {
       );
     }
 
+    const defaultForceAllAi = Boolean(body.forceAllAi);
+    const defaultPhase: "google-first" | "full" | "ai-only" = defaultForceAllAi
+      ? "ai-only"
+      : body.phase === "ai-only" || body.phase === "full"
+        ? body.phase
+        : "google-first";
+
     const usedToday = await countTodaysPreviewQueries();
-    if (usedToday >= DAILY_QUERY_SOFT_LIMIT) {
+    if (defaultPhase !== "ai-only" && usedToday >= DAILY_QUERY_SOFT_LIMIT) {
       return NextResponse.json(
         {
           error: `Daily Google query soft limit reached (${DAILY_QUERY_SOFT_LIMIT}). Try again tomorrow.`,
@@ -80,7 +89,6 @@ export async function POST(req: Request) {
 
     const defaultNiche = isValidNiche(body.niche) ? body.niche : DEFAULT_NICHE;
     const defaultAiBatch = Boolean(body.aiBatch);
-    const defaultPhase = body.phase || "google-first";
 
     const created = [];
     const errors: Array<{ index: number; error: string }> = [];
@@ -100,6 +108,15 @@ export async function POST(req: Request) {
       const niche = isValidNiche(item.niche) ? item.niche : defaultNiche;
       const aiBatch =
         item.aiBatch !== undefined ? Boolean(item.aiBatch) : defaultAiBatch;
+      const forceAllAi =
+        item.forceAllAi !== undefined
+          ? Boolean(item.forceAllAi)
+          : defaultForceAllAi;
+      const phase: "google-first" | "full" | "ai-only" = forceAllAi
+        ? "ai-only"
+        : item.phase === "ai-only" || item.phase === "full"
+          ? item.phase
+          : defaultPhase;
       const voiceoverDurationSec = parseVoiceoverDuration(
         item.voiceoverDurationSec,
         item.voiceoverDuration,
@@ -111,11 +128,16 @@ export async function POST(req: Request) {
             title: item.title?.trim() || deriveJobTitle(script),
             niche,
             script,
-            phase: item.phase || defaultPhase,
+            phase,
             status: "queued",
-            progress: aiBatch
-              ? "Queued — AI Batch mode (50% cheaper, up to 24h)…"
-              : "Queued — cloud worker will claim shortly…",
+            progress:
+              phase === "ai-only"
+                ? aiBatch
+                  ? "Queued — all AI · Batch mode (50% off, up to 24h)…"
+                  : "Queued — all AI · realtime gpt-image-2…"
+                : aiBatch
+                  ? "Queued — AI Batch mode (50% cheaper, up to 24h)…"
+                  : "Queued — cloud worker will claim shortly…",
             voiceoverDurationSec,
             aiBatch,
           },
