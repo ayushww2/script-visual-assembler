@@ -418,7 +418,10 @@ export function isBadGoogleScenePick(scene: {
   return false;
 }
 
-/** Append negative keywords so Google Images returns cleaner photos. */
+/**
+ * Keep Google queries SHORT and direct (2–6 words).
+ * Do NOT stuff long -watermark/-logo negative lists — pick/review handles junk.
+ */
 export function withCleanPhotoQuery(
   query: string,
   personName?: string | null,
@@ -426,39 +429,33 @@ export function withCleanPhotoQuery(
 ): string {
   const person = (personName || "").trim();
   const place = (placeName || "").trim();
-  const base = (query || "").trim();
+  const base = (query || "").trim().replace(/\s+/g, " ");
 
-  // Person lock — portrait of that person only
+  // Person lock — short portrait query
   if (person && !isPlaceOrObjectName(person)) {
-    const personNeg = personSearchNegatives(person);
-    return `"${person}" portrait photo -logo -watermark -text -subtitle -meme -quote -poster -thumbnail -collage -screenshot -composite -creativemarket ${personNeg}`
-      .replace(/\s+/g, " ")
-      .trim();
+    return `${person} portrait`.replace(/\s+/g, " ").trim();
   }
 
-  // Place / object lock — empty landscape or gear, no people / resorts
+  // Place / object — short direct subject, light guidance only
   if (place || isPlaceOrObjectName(base)) {
     const p = place || base;
-    const placeNeg = placeSearchNegatives(p);
     const pl = p.toLowerCase();
     const baseL = base.toLowerCase();
-    let core = base;
     if (pl.includes("tahoe") || baseL.includes("tahoe")) {
       if (/underwater|deep|beneath|dark|rov|lakebed|submersible/i.test(baseL)) {
-        core = "Lake Tahoe underwater ROV deep water silt";
-      } else {
-        // Surface beats: pure lake + mountains, not golf/resorts
-        core = "Lake Tahoe clear blue water aerial mountains shoreline empty";
+        return "Lake Tahoe underwater ROV";
       }
-    } else if (!/aerial|landscape|underwater|rov/.test(baseL)) {
-      core = `${p} landscape aerial wilderness`;
+      return "Lake Tahoe aerial shoreline";
     }
-    return `${core} ${placeNeg}`.replace(/\s+/g, " ").trim();
+    // Keep director query if already short; else use place name + one cue
+    const words = base.split(/\s+/).filter(Boolean);
+    if (words.length <= 5) return base;
+    return `${p}`.replace(/\s+/g, " ").trim();
   }
 
-  return `${base} -logo -watermark -text -subtitle -meme -quote -poster -thumbnail -collage -screenshot -composite -creativemarket -wedding -bride -couple`
-    .replace(/\s+/g, " ")
-    .trim();
+  // Generic: trim to first ~5 tokens — no negative spam
+  const words = base.split(/\s+/).filter(Boolean);
+  return words.slice(0, 5).join(" ");
 }
 
 /**

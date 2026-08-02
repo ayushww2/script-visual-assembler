@@ -4,6 +4,7 @@ import { runScriptDivider } from "@/lib/divider/run";
 import { pickBestGoogleHit, searchGoogleImages } from "@/lib/search/google";
 import {
   GOOGLE_SEARCH_CONCURRENCY,
+  MAX_CONCURRENT_JOBS,
   PREVIEW_IMAGES_PER_QUERY,
 } from "@/lib/jobs/limits";
 import type { GoogleSearchPreview } from "@/lib/search/google";
@@ -21,6 +22,7 @@ import {
   isWrongChairPersonSwap,
   repairChairClicheAiScenes,
 } from "@/lib/jobs/repairAiCliche";
+import { reviewAndRepickFromSameSearch } from "@/lib/jobs/reviewGoogle";
 import {
   mapPartsParallel,
   PARALLEL_PARTS,
@@ -33,27 +35,17 @@ import {
 } from "@/lib/package/handover";
 import { getNiche } from "@/lib/niches";
 
-/** In-process lock so one Node instance only runs one heavy job at a time. */
-let processing = false;
-const waiters: Array<() => void> = [];
-
-async function withJobLock<T>(fn: () => Promise<T>): Promise<T> {
-  if (processing) {
-    await new Promise<void>((resolve) => waiters.push(resolve));
-  }
-  processing = true;
-  try {
-    return await fn();
-  } finally {
-    processing = false;
-    const next = waiters.shift();
-    if (next) next();
-  }
-}
+/** In-flight job ids — allow MAX_CONCURRENT_JOBS parallel scripts. */
+const activeJobs = new Set<string>();
 
 export async function processJob(jobId: string): Promise<void> {
   console.log("[jobs] processJob enter", jobId);
-  await withJobLock(async () => {
+  if (activeJobs.has(jobId)) {
+    console.log("[jobs] processJob already active", jobId);
+    return;
+  }
+  activeJobs.add(jobId);
+  try {
     const job = await prisma.job.findUnique({ where: { id: jobId } });
     if (!job) {
       console.warn("[jobs] processJob missing", jobId);
@@ -308,7 +300,18 @@ export async function processJob(jobId: string): Promise<void> {
 
       // Keep all successful Google stills — no forced mix %. AI fills misses only.
       scenes = balanceGoogleAiScenes(scenes);
+
+      // Bad Google still → next image from SAME search (no new query)
+      const reviewed = reviewAndRepickFromSameSearch({ scenes, previews });
+      scenes = reviewed.scenes;
+      if (reviewed.repaired > 0) {
+        await onProgress(
+          `Reviewed Google picks · swapped ${reviewed.repaired} from same search…`,
+        );
+      }
+
       const mix = countSources(scenes);
+      const googleQueries = divided.result.googleSearches.length;
 
       await prisma.job.update({
         where: { id: jobId },
@@ -316,12 +319,12 @@ export async function processJob(jobId: string): Promise<void> {
           previewsJson: previews as unknown as Prisma.InputJsonValue,
           scenesJson: scenes as unknown as Prisma.InputJsonValue,
           sceneCount: scenes.length,
-          googleCount: mix.google,
+          googleCount: googleQueries,
           aiCount: mix.ai,
           previewDone: true,
           progress: job.aiBatch
-            ? `Scenes ${scenes.length} · Google ${mix.google} · AI ${mix.ai} — AI Batch (50% cheaper)…`
-            : `Scenes ${scenes.length} · Google ${mix.google} · AI ${mix.ai} — splitting into ${PARALLEL_PARTS} parallel parts…`,
+            ? `Scenes ${scenes.length} · ${googleQueries} Google queries · ${mix.ai} AI — Batch…`
+            : `Scenes ${scenes.length} · ${googleQueries} Google queries · ${mix.ai} AI…`,
         },
       });
 
@@ -351,12 +354,25 @@ export async function processJob(jobId: string): Promise<void> {
         },
       });
 
+      const finalMix = countSources(scenes);
+      await prisma.job.update({
+        where: { id: jobId },
+        data: {
+          googleCount: googleQueries,
+          aiCount: finalMix.ai,
+          scenesJson: scenes as unknown as Prisma.InputJsonValue,
+          sceneCount: scenes.length,
+        },
+      });
+
       await finishPackage({
         jobId,
         job,
         scenes,
         nicheWpm: niche.wpm,
         onProgress,
+        googleQueries,
+        aiStills: finalMix.ai,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Job failed";
@@ -370,7 +386,9 @@ export async function processJob(jobId: string): Promise<void> {
         },
       });
     }
-  });
+  } finally {
+    activeJobs.delete(jobId);
+  }
 }
 
 /** Re-select Google hits from saved previews with stricter clean/person rules. */
@@ -435,14 +453,21 @@ async function finishPackage(input: {
   scenes: Awaited<ReturnType<typeof buildScenes>>;
   nicheWpm: number;
   onProgress: (message: string) => Promise<void>;
+  googleQueries?: number;
+  aiStills?: number;
 }): Promise<void> {
   let scenes = input.scenes;
+  const mix = countSources(scenes);
+  const googleQueries = input.googleQueries ?? mix.google;
+  const aiStills = input.aiStills ?? mix.ai;
 
   await prisma.job.update({
     where: { id: input.jobId },
     data: {
       scenesJson: scenes as unknown as Prisma.InputJsonValue,
       sceneCount: scenes.length,
+      googleCount: googleQueries,
+      aiCount: aiStills,
       progress: "Building Remotion render package…",
     },
   });
@@ -468,13 +493,15 @@ async function finishPackage(input: {
         status: "completed",
         scenesJson: scenes as unknown as Prisma.InputJsonValue,
         sceneCount: scenes.length,
+        googleCount: googleQueries,
+        aiCount: aiStills,
         packageReady: true,
         packageUrl: handover.packageUrl,
         packageJson: handover.packageJson as unknown as Prisma.InputJsonValue,
         packageError: null,
         imagesOnly: handover.imagesOnly,
         voiceoverDurationSec: handover.voiceoverDurationSec,
-        progress: `Package ready · scenes=${handover.packageJson.scenes.length} · vo=${handover.voiceoverDurationSec.toFixed(1)}s · wpm=${input.nicheWpm}`,
+        progress: `Package ready · ${handover.packageJson.scenes.length} scenes · ${googleQueries} Google queries · ${aiStills} AI · vo=${handover.voiceoverDurationSec.toFixed(1)}s`,
         completedAt: new Date(),
       },
     });
@@ -518,32 +545,57 @@ export async function resumePendingJobs(): Promise<void> {
     pending.map((j) => j.id).join(","),
   );
 
-  // Await serially so Next request teardown cannot drop the work.
-  for (const job of pending) {
-    await processJob(job.id);
-  }
+  // Resume up to concurrency limit in parallel
+  const chunk = pending.slice(0, MAX_CONCURRENT_JOBS);
+  await Promise.all(chunk.map((j) => processJob(j.id)));
 }
 
-const WORKER_IDLE_MS = 5_000;
+const WORKER_IDLE_MS = 2_500;
 
-/** Long-lived loop used by instrumentation — awaits each job to completion. */
+/** Long-lived loop — runs up to MAX_CONCURRENT_JOBS scripts at once. */
 export async function runJobWorkerLoop(): Promise<void> {
-  console.log("[jobs] worker loop online");
+  console.log(
+    "[jobs] worker loop online · concurrency=",
+    MAX_CONCURRENT_JOBS,
+  );
   for (;;) {
     try {
-      const job = await prisma.job.findFirst({
-        where: { status: { in: ["queued", "running"] } },
-        orderBy: { createdAt: "asc" },
-        select: { id: true, status: true, progress: true },
-      });
-
-      if (!job) {
+      const slots = MAX_CONCURRENT_JOBS - activeJobs.size;
+      if (slots <= 0) {
         await new Promise((r) => setTimeout(r, WORKER_IDLE_MS));
         continue;
       }
 
-      console.log("[jobs] worker claim", job.id, job.status, job.progress);
-      await processJob(job.id);
+      const candidates = await prisma.job.findMany({
+        where: { status: { in: ["queued", "running"] } },
+        orderBy: { createdAt: "asc" },
+        select: { id: true, status: true, progress: true },
+        take: MAX_CONCURRENT_JOBS + activeJobs.size,
+      });
+      const toStart = candidates
+        .filter((j) => !activeJobs.has(j.id))
+        .slice(0, slots);
+
+      if (!toStart.length) {
+        await new Promise((r) => setTimeout(r, WORKER_IDLE_MS));
+        continue;
+      }
+
+      for (const job of toStart) {
+        console.log(
+          "[jobs] worker claim",
+          job.id,
+          job.status,
+          `active=${activeJobs.size + 1}/${MAX_CONCURRENT_JOBS}`,
+          job.progress,
+        );
+        // Fire-and-track; loop keeps claiming until concurrency full
+        void processJob(job.id).catch((error) => {
+          console.error("[jobs] processJob crashed", job.id, error);
+        });
+      }
+
+      await new Promise((r) => setTimeout(r, 500));
     } catch (error) {
       console.error("[jobs] worker iteration failed", error);
       await new Promise((r) => setTimeout(r, WORKER_IDLE_MS));

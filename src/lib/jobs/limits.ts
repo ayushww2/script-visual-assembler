@@ -2,10 +2,17 @@ import { prisma } from "@/lib/db";
 
 /** Soft capacity for Google previews / day. */
 export const DAILY_QUERY_SOFT_LIMIT = 2500;
-export const MAX_CONCURRENT_JOBS = 1;
+/** How many scripts can process in parallel on one worker. */
+export const MAX_CONCURRENT_JOBS = Math.max(
+  1,
+  Math.min(5, Number(process.env.MAX_CONCURRENT_JOBS || 3) || 3),
+);
 
-/** Fetch candidates; keep ONE best landscape / no-watermark hit per scene. */
-export const PREVIEW_IMAGES_PER_QUERY = 8;
+/** Fetch candidates; keep ONE best landscape hit; extras allow same-search repick. */
+export const PREVIEW_IMAGES_PER_QUERY = Math.max(
+  8,
+  Number(process.env.PREVIEW_IMAGES_PER_QUERY || 12) || 12,
+);
 /** Parallel Google searches — target whole Google phase under ~1–2 min. */
 export const GOOGLE_SEARCH_CONCURRENCY = Math.max(
   1,

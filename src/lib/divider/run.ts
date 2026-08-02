@@ -9,6 +9,7 @@ import {
 import { DIRECTOR_BATCH_CONCURRENCY } from "@/lib/jobs/limits";
 import { forceNamedEntitiesToGoogle } from "@/lib/divider/namedEntity";
 import { forceGoogleFirstSubjects } from "@/lib/divider/googleFirst";
+import { applyVisualBudget } from "@/lib/divider/budget";
 
 const DIRECTOR_BATCH_SIZE = 40;
 
@@ -169,10 +170,12 @@ export async function runScriptDivider(input: {
   const named = forceNamedEntitiesToGoogle(beats, merged);
   // Photographable places/objects (tombs, sites, etc.) → Google-first, not AI
   const enforced = forceGoogleFirstSubjects(beats, named);
+  // ≤125 Google queries · ≤100 AI · pack ~2 beats/query on large films
+  const budgeted = applyVisualBudget(beats, enforced);
 
   return {
     beats,
-    result: enforced,
+    result: budgeted,
     model,
     usage: { inputTokens, outputTokens },
   };

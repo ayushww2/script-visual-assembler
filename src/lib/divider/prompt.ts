@@ -47,7 +47,8 @@ AI ONLY when ALL of these are true:
   no concrete stand-in).
 
 NO forced Google/AI percentage. Prefer Google whenever a real photo can exist.
-More Google is better. AI is last resort only — never strip Google to hit a ratio.
+More Google is better. Budget: ≤125 Google queries · ≤100 AI stills (pack 2 scenes/query).
+AI is last resort only — never strip Google to hit a ratio.
 
 A) GOOGLE — authentic real-world photos (default):
 - people, places, films, events, tombs, sites, manuscripts, news, studios
@@ -60,17 +61,17 @@ B) AI GENERATE — last resort only:
 ────────────────────────────────
 STEP C — GOOGLE QUERY RULES
 ────────────────────────────────
-- 2–4 words (prefer 2–3), entity-first
-- searchable photo language, no filler
-- Prefer ONE google pack PER google beat (relatedBeatIds length 1)
-- Only share a pack across 2 beats when they are the exact same visual subject
+- SHORT direct queries: 2–4 words, entity-first. No long negative keyword lists.
+- Prefer relatedBeatIds length 2 for back-to-back / same-subject beats
+  (ONE Google query → TWO scenes). Required on large films (~350–400 beats).
+- HARD BUDGET for a full film: ≤125 Google queries · ≤100 AI stills.
+  Pack beats onto shared queries; reuse visuals for consecutive scenes when it makes sense.
 - No duplicate exact queries in this batch
 - If the beat is about ONE real person, the query MUST name that person
-  (e.g. "mel gibson", "joe rogan", "jesus christ") — never a vague theme.
-  Prefer a single-subject photo intent (portrait / interview still), not cast/group.
-- Never aim for posters, thumbnails, memes, quote cards, logos, or text overlays.
+  (e.g. "mel gibson", "joe rogan") — never a vague theme.
+- Never aim for posters, thumbnails, memes, quote cards, or logo graphics.
 
-Good: mel gibson interview | joe rogan podcast | passion of the christ set
+Good: mel gibson interview | joe rogan podcast | dead sea scrolls museum
 Bad: something was moving beneath the dead landscape | raising eyebrows meme
 
 ────────────────────────────────
@@ -144,13 +145,19 @@ export function buildDirectorUserPrompt(
       ? `BATCH ${((opts.batchIndex ?? 0) + 1)}/${opts.batchCount} of a ~${opts.totalBeats}-beat film. Cover ONLY the beats listed below.`
       : `Full film batch.`;
 
+  const largeFilm =
+    (opts?.totalBeats || sceneCount) >= 280
+      ? ` LARGE FILM (~${opts?.totalBeats || sceneCount} beats): pack relatedBeatIds=2 (one query → two scenes). Stay under 125 Google queries / 100 AI for the whole film.`
+      : "";
+
   const phaseNote =
     phase === "google-first"
       ? `PHASE: assign Google vs AI for every beat in this batch.
 Every beatId must appear exactly once across googleSearches + aiGenerate.
 NO % quota — use Google for every beat that has a real photographable subject.
-AI only when there is truly no honest real photo. More Google is better.`
-      : `Produce Google + AI for every beat. Prefer Google; no forced mix %.`;
+Prefer relatedBeatIds of 2 for back-to-back similar beats. Short 2–4 word queries.
+AI only when there is truly no honest real photo. More Google is better.${largeFilm}`
+      : `Produce Google + AI for every beat. Prefer Google; pack 2 scenes/query when it fits.${largeFilm}`;
 
   return `${phaseNote}
 
@@ -160,8 +167,8 @@ SELECTED NICHE: ${niche.label} ${niche.version}
 ${niche.promptGuide}
 
 This batch: ${sceneCount} beats · ~${minutes.toFixed(2)} min @ ${niche.wpm} WPM
-Prefer Google for as many beats as possible. AI last resort only — no mix ratio.
-Google-first: tombs/places/people/films/manuscripts → Google.
+Film budget: ≤125 Google queries · ≤100 AI stills. Pack/reuse consecutive scenes.
+Prefer Google. Short direct queries. Google-first: tombs/places/people/films/manuscripts.
 
 BEATS:
 ${beatBlock}

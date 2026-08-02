@@ -778,7 +778,12 @@ export default function Home() {
                     key={job.id}
                     className="fade-rise rounded-2xl border border-[rgba(96,165,250,0.28)] bg-[linear-gradient(180deg,rgba(59,130,246,0.12),rgba(16,21,34,0.96))] px-5 py-5 shadow-[0_12px_40px_rgba(0,0,0,0.28)]"
                   >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
+                    <JobBudgetBar
+                      googleCount={job.googleCount}
+                      aiCount={job.aiCount}
+                      sceneCount={job.sceneCount}
+                    />
+                    <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <p className="text-base font-semibold text-white">
                           {job.title || "Untitled"}
@@ -861,37 +866,42 @@ export default function Home() {
                                   key={job.id}
                                   type="button"
                                   onClick={() => openJob(job.id)}
-                                  className="click-row flex w-full items-center gap-4 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-4 py-4 text-left"
+                                  className="click-row flex w-full flex-col gap-2 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-4 py-4 text-left"
                                 >
-                                  <div className="min-w-0 flex-1">
-                                    <p className="truncate text-base font-semibold text-white">
-                                      {job.title || "Untitled"}
-                                    </p>
-                                    <p className="mt-1 text-xs text-[var(--ink-soft)]">
-                                      {nicheLabel(job.niche)}
-                                      {" · "}
-                                      {job.status === "failed"
-                                        ? job.error || "Failed"
-                                        : `${job.sceneCount || 0} scenes · ${job.googleCount} Google packs`}
-                                      {job.packageReady
-                                        ? " · package ready"
-                                        : job.packageError
-                                          ? " · package pending"
-                                          : ""}
-                                    </p>
+                                  <JobBudgetBar
+                                    googleCount={job.googleCount}
+                                    aiCount={job.aiCount}
+                                    sceneCount={job.sceneCount}
+                                  />
+                                  <div className="flex w-full items-center gap-4">
+                                    <div className="min-w-0 flex-1">
+                                      <p className="truncate text-base font-semibold text-white">
+                                        {job.title || "Untitled"}
+                                      </p>
+                                      <p className="mt-1 text-xs text-[var(--ink-soft)]">
+                                        {nicheLabel(job.niche)}
+                                        {job.status === "failed"
+                                          ? ` · ${job.error || "Failed"}`
+                                          : job.packageReady
+                                            ? " · package ready"
+                                            : job.packageError
+                                              ? " · package pending"
+                                              : ""}
+                                      </p>
+                                    </div>
+                                    <span
+                                      className={`rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide uppercase ${
+                                        job.status === "failed"
+                                          ? "bg-[rgba(248,113,113,0.12)] text-[var(--danger)]"
+                                          : "bg-[rgba(52,211,153,0.12)] text-[var(--ok)]"
+                                      }`}
+                                    >
+                                      {statusLabel(job.status)}
+                                    </span>
+                                    <span className="chevron shrink-0 text-sm font-semibold text-[var(--ink-soft)]">
+                                      Open →
+                                    </span>
                                   </div>
-                                  <span
-                                    className={`rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide uppercase ${
-                                      job.status === "failed"
-                                        ? "bg-[rgba(248,113,113,0.12)] text-[var(--danger)]"
-                                        : "bg-[rgba(52,211,153,0.12)] text-[var(--ok)]"
-                                    }`}
-                                  >
-                                    {statusLabel(job.status)}
-                                  </span>
-                                  <span className="chevron shrink-0 text-sm font-semibold text-[var(--ink-soft)]">
-                                    Open →
-                                  </span>
                                 </button>
                               ))}
                             </div>
@@ -935,6 +945,33 @@ function EmptyState({ text }: { text: string }) {
   return (
     <div className="rounded-xl border border-dashed border-[var(--line)] bg-[var(--panel)] px-5 py-10 text-sm text-[var(--ink-soft)]">
       {text}
+    </div>
+  );
+}
+
+function JobBudgetBar({
+  googleCount,
+  aiCount,
+  sceneCount,
+}: {
+  googleCount?: number | null;
+  aiCount?: number | null;
+  sceneCount?: number | null;
+}) {
+  const g = googleCount ?? 0;
+  const a = aiCount ?? 0;
+  const s = sceneCount ?? 0;
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold tracking-wide">
+      <span className="rounded-md border border-[rgba(96,165,250,0.35)] bg-[rgba(59,130,246,0.14)] px-2 py-0.5 text-[var(--blue-bright)]">
+        {g} Google queries
+      </span>
+      <span className="rounded-md border border-[rgba(52,211,153,0.3)] bg-[rgba(52,211,153,0.1)] px-2 py-0.5 text-[var(--ok)]">
+        {a} AI images
+      </span>
+      {s > 0 ? (
+        <span className="text-[var(--ink-soft)]">{s} scenes</span>
+      ) : null}
     </div>
   );
 }
@@ -1024,8 +1061,13 @@ function JobDetailView({
       ) : null}
 
       <div className="mt-5 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold tracking-[0.18em] text-[var(--blue-bright)] uppercase">
+        <div className="min-w-0 flex-1">
+          <JobBudgetBar
+            googleCount={detail.googleCount}
+            aiCount={detail.aiCount}
+            sceneCount={detail.sceneCount || scenes.length}
+          />
+          <p className="mt-3 text-xs font-semibold tracking-[0.18em] text-[var(--blue-bright)] uppercase">
             {statusLabel(detail.status)}
           </p>
           <h2 className="mt-2 max-w-3xl font-[family-name:var(--font-fraunces)] text-4xl text-white">
@@ -1033,9 +1075,7 @@ function JobDetailView({
           </h2>
           <p className="mt-3 text-sm text-[var(--ink-soft)]">
             {nicheLabel(detail.niche)}
-            {detail.wpm ? ` · ${detail.wpm} WPM` : ""} ·{" "}
-            {detail.sceneCount || scenes.length} scenes · {detail.googleCount}{" "}
-            Google · {detail.aiCount} AI
+            {detail.wpm ? ` · ${detail.wpm} WPM` : ""}
             {detail.model ? ` · ${detail.model}` : ""}
           </p>
         </div>
