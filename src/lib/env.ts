@@ -48,3 +48,30 @@ export function getOpenAiImageConfig() {
       | "auto",
   };
 }
+
+/** Free stock B-roll — https://www.pexels.com/api/ */
+export function getPexelsConfig() {
+  const apiKey = (process.env.PEXELS_API_KEY || "").trim();
+  const enabled =
+    Boolean(apiKey) &&
+    process.env.PEXELS_ENABLED !== "0" &&
+    process.env.PEXELS_ENABLED !== "false";
+  return {
+    apiKey,
+    enabled,
+    /** Seconds of each clip Remotion should play (loop for longer narration). */
+    useSec: Math.max(
+      3,
+      Math.min(12, Number(process.env.PEXELS_USE_SEC || "5") || 5),
+    ),
+    concurrency: Math.max(
+      1,
+      Number(process.env.PEXELS_CONCURRENCY || "2") || 2,
+    ),
+    /** Soft cap per job so we stay under the free hourly quota. */
+    maxPerJob: Math.max(
+      0,
+      Number(process.env.PEXELS_MAX_PER_JOB || "40") || 40,
+    ),
+  };
+}

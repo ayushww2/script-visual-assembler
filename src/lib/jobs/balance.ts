@@ -98,11 +98,13 @@ export function balanceGoogleAiScenes(scenes: SceneRecord[]): SceneRecord[] {
 export function countSources(scenes: SceneRecord[]) {
   let google = 0;
   let ai = 0;
+  let pexels = 0;
   let other = 0;
   for (const s of scenes) {
-    if (s.visualSource === "google" && s.imageUrl) google += 1;
+    if (s.visualSource === "pexels" && s.videoUrl) pexels += 1;
+    else if (s.visualSource === "google" && s.imageUrl) google += 1;
     else if (s.visualSource === "ai" || !s.imageUrl) ai += 1;
     else other += 1;
   }
-  return { google, ai, other, total: scenes.length };
+  return { google, ai, pexels, other, total: scenes.length };
 }

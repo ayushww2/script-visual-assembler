@@ -31,7 +31,9 @@ import {
   buildAndUploadRenderPackage,
   HandoverPackagerError,
 } from "@/lib/package/handover";
+import { enrichScenesWithPexels } from "@/lib/jobs/enrichPexels";
 import { getNiche } from "@/lib/niches";
+import { getPexelsConfig } from "@/lib/env";
 
 /** In-process lock so one Node instance only runs one heavy job at a time. */
 let processing = false;
@@ -189,6 +191,25 @@ export async function processJob(jobId: string): Promise<void> {
             });
           },
         });
+
+        if (getPexelsConfig().enabled) {
+          const pexels = await enrichScenesWithPexels({
+            jobId: job.id,
+            scenes,
+            onProgress,
+          });
+          scenes = pexels.scenes;
+          await prisma.job.update({
+            where: { id: jobId },
+            data: {
+              scenesJson: scenes as unknown as Prisma.InputJsonValue,
+              sceneCount: scenes.length,
+              progress: pexels.attached
+                ? `Pexels · ${pexels.attached} clips attached · packaging…`
+                : `Pexels · skipped (${pexels.skipped || "none"}) · packaging…`,
+            },
+          });
+        }
 
         await finishPackage({
           jobId,
@@ -350,6 +371,26 @@ export async function processJob(jobId: string): Promise<void> {
           });
         },
       });
+
+      // Optional short Pexels B-roll on place/landscape scenes (~4–5s use).
+      if (getPexelsConfig().enabled) {
+        const pexels = await enrichScenesWithPexels({
+          jobId: job.id,
+          scenes,
+          onProgress,
+        });
+        scenes = pexels.scenes;
+        await prisma.job.update({
+          where: { id: jobId },
+          data: {
+            scenesJson: scenes as unknown as Prisma.InputJsonValue,
+            sceneCount: scenes.length,
+            progress: pexels.attached
+              ? `Pexels · ${pexels.attached} clips attached · packaging…`
+              : `Pexels · skipped (${pexels.skipped || "none"}) · packaging…`,
+          },
+        });
+      }
 
       await finishPackage({
         jobId,

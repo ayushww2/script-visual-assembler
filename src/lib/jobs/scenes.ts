@@ -31,7 +31,7 @@ export type SceneRecord = {
   scriptText: string;
   start?: number;
   end?: number;
-  visualSource: "google" | "ai" | "unassigned";
+  visualSource: "google" | "ai" | "pexels" | "unassigned";
   query?: string;
   subject?: string;
   entityContext?: string;
@@ -44,6 +44,22 @@ export type SceneRecord = {
   sourceDomain?: string | null;
   r2Url?: string | null;
   email?: string | null;
+
+  /** Optional short stock clip (Pexels). Poster stays in imageUrl. */
+  videoUrl?: string | null;
+  videoSource?: "pexels" | null;
+  /** Full source clip length in seconds. */
+  videoDurationSec?: number | null;
+  /** Seconds Remotion should play from the clip (~4–5). */
+  videoUseSec?: number | null;
+  /** Loop the clip when narration durationSec > videoUseSec. */
+  videoLoop?: boolean | null;
+  pexels?: {
+    id: number;
+    photographer: string;
+    photographerUrl: string;
+    pageUrl: string;
+  } | null;
 };
 
 export type JobExportPayload = {

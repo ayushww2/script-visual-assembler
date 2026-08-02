@@ -54,9 +54,20 @@ async function patchPackageSceneImage(input: {
   }
 
   const packageJson: RenderPackage = {
-    scenes: input.existing.scenes.map((s, i) =>
-      i === input.sceneIndex0 ? { ...s, imageUrl: input.imageUrl } : s,
-    ),
+    version: input.existing.version,
+    scenes: input.existing.scenes.map((s, i) => {
+      if (i !== input.sceneIndex0) return s;
+      // AI still replaces any prior Pexels clip on this beat.
+      const {
+        videoUrl: _v,
+        videoUseSec: _u,
+        videoDurationSec: _d,
+        videoLoop: _l,
+        videoSource: _s,
+        ...rest
+      } = s;
+      return { ...rest, imageUrl: input.imageUrl };
+    }),
   };
 
   const uploaded = await uploadToR2({
@@ -127,6 +138,12 @@ export async function replaceSceneWithAi(
     sourceUrl: put.url,
     sourceDomain: null,
     imageCandidates: [],
+    videoUrl: null,
+    videoSource: null,
+    videoDurationSec: null,
+    videoUseSec: null,
+    videoLoop: null,
+    pexels: null,
     why: input.why || `AI still · ${input.visualIdea}`,
   };
 

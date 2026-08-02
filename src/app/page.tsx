@@ -70,7 +70,7 @@ type Scene = {
   endSec?: number;
   durationSec?: number;
   timingSource?: "whisper" | "wpm";
-  visualSource: "google" | "ai" | "unassigned";
+  visualSource: "google" | "ai" | "pexels" | "unassigned";
   query?: string;
   subject?: string;
   entityContext?: string;
@@ -81,6 +81,17 @@ type Scene = {
   sourceDomain?: string | null;
   r2Url?: string | null;
   email?: string | null;
+  videoUrl?: string | null;
+  videoSource?: "pexels" | null;
+  videoDurationSec?: number | null;
+  videoUseSec?: number | null;
+  videoLoop?: boolean | null;
+  pexels?: {
+    id: number;
+    photographer: string;
+    photographerUrl: string;
+    pageUrl: string;
+  } | null;
 };
 
 function sceneIdOf(scene: Scene) {
@@ -1003,7 +1014,32 @@ function JobDetailView({
                       </div>
 
                       <div className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-3 sm:p-4">
-                        {thumb ? (
+                        {scene.videoUrl ? (
+                          <div className="overflow-hidden rounded-lg border border-[var(--line)] bg-black/30">
+                            <video
+                              src={scene.videoUrl}
+                              poster={thumb || undefined}
+                              className="aspect-video w-full object-cover"
+                              controls
+                              muted
+                              playsInline
+                              loop={scene.videoLoop !== false}
+                              preload="metadata"
+                            />
+                            {typeof scene.videoUseSec === "number" ? (
+                              <p className="px-2 py-1.5 text-[11px] text-[var(--ink-soft)]">
+                                Use ~{scene.videoUseSec}s
+                                {scene.videoDurationSec
+                                  ? ` of ${scene.videoDurationSec}s clip`
+                                  : ""}
+                                {scene.videoLoop !== false ? " · loop" : ""}
+                                {scene.pexels?.photographer
+                                  ? ` · ${scene.pexels.photographer} / Pexels`
+                                  : ""}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : thumb ? (
                           <div className="overflow-hidden rounded-lg border border-[var(--line)] bg-black/30">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
@@ -1024,6 +1060,11 @@ function JobDetailView({
                           <Field label="Image URL">
                             <UrlOrEmpty value={scene.imageUrl} />
                           </Field>
+                          {scene.videoUrl ? (
+                            <Field label="Video URL">
+                              <UrlOrEmpty value={scene.videoUrl} />
+                            </Field>
+                          ) : null}
                           <Field label="Source URL">
                             <UrlOrEmpty value={scene.sourceUrl} />
                           </Field>
