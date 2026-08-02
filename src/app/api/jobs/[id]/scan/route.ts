@@ -6,12 +6,19 @@ import { getContactBoxConfig } from "@/lib/contactbox";
 export const dynamic = "force-dynamic";
 export const maxDuration = 3600;
 
-/** POST — ContactBox vision QA over all scene stills vs narration words. */
+/** POST — ContactBox vision QA over scene stills vs narration words. ?start=0&limit=50 for chunks. */
 export async function POST(
-  _req: Request,
+  req: Request,
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
+  const url = new URL(req.url);
+  const start = Math.max(0, Number(url.searchParams.get("start") || 0) || 0);
+  const limitParam = url.searchParams.get("limit");
+  const limit =
+    limitParam === null || limitParam === ""
+      ? undefined
+      : Math.max(1, Number(limitParam) || 50);
   const contactbox = getContactBoxConfig();
   if (!contactbox.configured) {
     return NextResponse.json(
@@ -42,11 +49,18 @@ export async function POST(
     }));
 
     const withImages = scenes.filter((s) => s.imageUrl && s.words);
-    const result = await scanAllScenes(withImages, { batchSize: 15, concurrency: 2 });
+    const slice =
+      limit !== undefined
+        ? withImages.slice(start, start + limit)
+        : withImages.slice(start);
+    const result = await scanAllScenes(slice, { batchSize: 8, concurrency: 1 });
 
     return NextResponse.json({
       jobId: id,
       title: job.title,
+      start,
+      limit: limit ?? slice.length,
+      totalScenes: withImages.length,
       ...result,
     });
   } catch (error) {
