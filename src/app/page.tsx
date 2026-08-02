@@ -88,6 +88,10 @@ type Scene = {
   sourceUrl?: string | null;
   sourceDomain?: string | null;
   r2Url?: string | null;
+  /** Optional Pexels (or other) B-roll clip. */
+  videoUrl?: string | null;
+  videoQuery?: string | null;
+  videoSource?: string | null;
   email?: string | null;
 };
 
@@ -1358,6 +1362,9 @@ function JobDetailView({
             {nicheLabel(detail.niche)}
             {detail.wpm ? ` · ${detail.wpm} WPM` : ""}
             {detail.model ? ` · ${detail.model}` : ""}
+            {scenes.filter((s) => s.videoUrl).length
+              ? ` · ${scenes.filter((s) => s.videoUrl).length} Pexels clips`
+              : ""}
           </p>
         </div>
         {detail.status === "failed" ? (
@@ -1387,6 +1394,9 @@ function JobDetailView({
         <p className="mt-2 text-sm text-[var(--ink-soft)]">
           Images stay minimized. Click a scene to maximize it — only one open at
           a time.
+          {scenes.some((s) => s.videoUrl)
+            ? " Scenes with a Pexels badge have a B-roll clip."
+            : ""}
         </p>
 
         {scenes.length === 0 ? (
@@ -1398,6 +1408,7 @@ function JobDetailView({
               const words = sceneWordsOf(scene);
               const open = expandedId === scene.id;
               const thumb = scene.thumbnailUrl || scene.imageUrl;
+              const hasVideo = Boolean(scene.videoUrl?.trim());
 
               return (
                 <article
@@ -1438,6 +1449,11 @@ function JobDetailView({
                         <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] uppercase text-[var(--ink-soft)]">
                           {scene.visualSource}
                         </span>
+                        {hasVideo ? (
+                          <span className="rounded-full border border-[rgba(251,191,36,0.4)] bg-[rgba(251,191,36,0.12)] px-2 py-0.5 text-[11px] font-semibold uppercase text-amber-200">
+                            Pexels
+                          </span>
+                        ) : null}
                         {typeof scene.durationSec === "number" ? (
                           <span className="text-[11px] text-[var(--ink-soft)]">
                             {scene.durationSec.toFixed(1)}s
@@ -1501,7 +1517,22 @@ function JobDetailView({
                         ) : null}
                       </div>
 
-                      <div className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-3 sm:p-4">
+                      <div className="min-w-0 space-y-3 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-3 sm:p-4">
+                        {hasVideo ? (
+                          <div className="overflow-hidden rounded-lg border border-[rgba(251,191,36,0.35)] bg-black/30">
+                            <video
+                              src={scene.videoUrl || undefined}
+                              controls
+                              playsInline
+                              preload="metadata"
+                              className="aspect-video w-full bg-black object-cover"
+                            />
+                            <p className="border-t border-[var(--line)] px-3 py-2 text-[11px] font-semibold tracking-wide text-amber-200 uppercase">
+                              Pexels B-roll
+                              {scene.videoQuery ? ` · ${scene.videoQuery}` : ""}
+                            </p>
+                          </div>
+                        ) : null}
                         {thumb ? (
                           <div className="overflow-hidden rounded-lg border border-[var(--line)] bg-black/30">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1511,15 +1542,20 @@ function JobDetailView({
                               className="aspect-video w-full object-cover"
                             />
                           </div>
-                        ) : (
+                        ) : !hasVideo ? (
                           <div className="flex aspect-video items-center justify-center rounded-lg border border-dashed border-[var(--line)] bg-black/20 text-sm text-[var(--ink-soft)]">
                             {scene.visualSource === "ai"
                               ? "AI still — no Google image"
                               : "No image preview"}
                           </div>
-                        )}
+                        ) : null}
 
                         <div className="mt-4 space-y-3">
+                          {hasVideo ? (
+                            <Field label="Pexels video URL">
+                              <UrlOrEmpty value={scene.videoUrl} />
+                            </Field>
+                          ) : null}
                           <Field label="Image URL">
                             <UrlOrEmpty value={scene.imageUrl} />
                           </Field>
