@@ -306,7 +306,7 @@ export async function processJob(jobId: string): Promise<void> {
         voiceoverDurationSec: job.voiceoverDurationSec,
       });
 
-      // Lock ~50/50 Google/AI before AI generation (excess Google → AI slots)
+      // Keep all successful Google stills — no forced mix %. AI fills misses only.
       scenes = balanceGoogleAiScenes(scenes);
       const mix = countSources(scenes);
 

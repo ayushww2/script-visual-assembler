@@ -46,7 +46,8 @@ AI ONLY when ALL of these are true:
 - the beat is purely abstract (emotion, unseen spiritual claim, metaphor with
   no concrete stand-in).
 
-Soft mix target ~60% Google / ~40% AI. Google-first always wins over the ratio.
+NO forced Google/AI percentage. Prefer Google whenever a real photo can exist.
+More Google is better. AI is last resort only — never strip Google to hit a ratio.
 
 A) GOOGLE — authentic real-world photos (default):
 - people, places, films, events, tombs, sites, manuscripts, news, studios
@@ -127,8 +128,6 @@ export function buildDirectorUserPrompt(
   const niche = getNiche(nicheId);
   const minutes = estimateDurationMinutes(beats, niche.wpm);
   const sceneCount = beats.length;
-  const targetGoogle = Math.floor(sceneCount / 2);
-  const targetAi = sceneCount - targetGoogle;
 
   const beatBlock = beats
     .map((b) => {
@@ -149,8 +148,9 @@ export function buildDirectorUserPrompt(
     phase === "google-first"
       ? `PHASE: assign Google vs AI for every beat in this batch.
 Every beatId must appear exactly once across googleSearches + aiGenerate.
-Target ~${targetGoogle} Google and ~${targetAi} AI for THIS batch.`
-      : `Produce the full Google + AI mix for every beat.`;
+NO % quota — use Google for every beat that has a real photographable subject.
+AI only when there is truly no honest real photo. More Google is better.`
+      : `Produce Google + AI for every beat. Prefer Google; no forced mix %.`;
 
   return `${phaseNote}
 
@@ -160,8 +160,8 @@ SELECTED NICHE: ${niche.label} ${niche.version}
 ${niche.promptGuide}
 
 This batch: ${sceneCount} beats · ~${minutes.toFixed(2)} min @ ${niche.wpm} WPM
-Soft target for THIS batch: prefer Google (~${Math.max(targetGoogle, Math.ceil(sceneCount * 0.6))}+) · AI only when truly needed.
-Google-first: tombs/places/people/films → Google. Do not blindly assign AI.
+Prefer Google for as many beats as possible. AI last resort only — no mix ratio.
+Google-first: tombs/places/people/films/manuscripts → Google.
 
 BEATS:
 ${beatBlock}

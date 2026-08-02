@@ -52,8 +52,7 @@ export function beatLooksLikeNamedRealWorld(text: string): boolean {
 
 /**
  * After the director runs: any named real-world beat stuck on AI
- * is forced onto a Google pack (best image later). Soft 50/50 never
- * overrides this.
+ * is forced onto a Google pack (best image later). No mix % overrides this.
  */
 export function forceNamedEntitiesToGoogle(
   beats: Beat[],
