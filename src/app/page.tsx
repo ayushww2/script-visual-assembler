@@ -193,8 +193,11 @@ export default function Home() {
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openDays, setOpenDays] = useState<Record<string, boolean>>({});
+  const [selectedPackageIds, setSelectedPackageIds] = useState<string[]>([]);
+  const [copyLinksMsg, setCopyLinksMsg] = useState<string | null>(null);
   const docxInputRef = useRef<HTMLInputElement>(null);
   const MAX_BATCH_DOCX = 10;
+  const MAX_COPY_PACKAGE_LINKS = 10;
 
   const dayGroups = useMemo(() => groupJobsByDay(jobs), [jobs]);
   const queueJobs = useMemo(
@@ -206,6 +209,20 @@ export default function Home() {
     [jobs],
   );
   const doneDayGroups = useMemo(() => groupJobsByDay(doneJobs), [doneJobs]);
+  const packageJobsById = useMemo(() => {
+    const map = new Map<string, JobListItem>();
+    for (const job of doneJobs) {
+      if (job.packageReady && job.packageUrl) map.set(job.id, job);
+    }
+    return map;
+  }, [doneJobs]);
+  const selectedPackageLinks = useMemo(
+    () =>
+      selectedPackageIds
+        .map((id) => packageJobsById.get(id)?.packageUrl)
+        .filter((url): url is string => Boolean(url)),
+    [selectedPackageIds, packageJobsById],
+  );
 
   const loadJobs = useCallback(async () => {
     const res = await fetch("/api/jobs");
@@ -215,8 +232,18 @@ export default function Home() {
       error?: string;
     };
     if (!res.ok) throw new Error(json.error || "Failed to load jobs");
-    setJobs(json.jobs || []);
+    const nextJobs = json.jobs || [];
+    setJobs(nextJobs);
     if (json.capacity) setCapacity(json.capacity);
+    setSelectedPackageIds((prev) => {
+      if (!prev.length) return prev;
+      const ready = new Set(
+        nextJobs
+          .filter((j) => j.packageReady && j.packageUrl)
+          .map((j) => j.id),
+      );
+      return prev.filter((id) => ready.has(id));
+    });
   }, []);
 
   const loadDetail = useCallback(async (id: string) => {
@@ -468,6 +495,32 @@ export default function Home() {
     setNav("jobs");
     setSelectedId(id);
     setError(null);
+  }
+
+  function togglePackageSelect(jobId: string) {
+    setCopyLinksMsg(null);
+    setSelectedPackageIds((prev) => {
+      if (prev.includes(jobId)) return prev.filter((id) => id !== jobId);
+      if (prev.length >= MAX_COPY_PACKAGE_LINKS) {
+        setCopyLinksMsg(`Max ${MAX_COPY_PACKAGE_LINKS} package links`);
+        return prev;
+      }
+      return [...prev, jobId];
+    });
+  }
+
+  async function copySelectedPackageLinks() {
+    const links = selectedPackageLinks;
+    if (!links.length) {
+      setCopyLinksMsg("Select jobs with a ready package");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(links.join("\n"));
+      setCopyLinksMsg(`Copied ${links.length} package link${links.length === 1 ? "" : "s"}`);
+    } catch {
+      setCopyLinksMsg("Clipboard failed — try again");
+    }
   }
 
   return (
@@ -820,8 +873,39 @@ export default function Home() {
                   Past jobs
                 </h2>
                 <p className="mt-3 text-[var(--ink-soft)]">
-                  Sorted by day. Click a title to open scenes.
+                  Sorted by day. Select up to {MAX_COPY_PACKAGE_LINKS} package-ready
+                  jobs to copy JSON links, or open a title for scenes.
                 </p>
+
+                <div className="mt-5 flex flex-wrap items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel)] px-4 py-3">
+                  <button
+                    type="button"
+                    disabled={!selectedPackageLinks.length}
+                    onClick={() => void copySelectedPackageLinks()}
+                    className="rounded-lg bg-[var(--blue)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--blue-deep)] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Copy package links
+                    {selectedPackageIds.length
+                      ? ` (${selectedPackageIds.length}/${MAX_COPY_PACKAGE_LINKS})`
+                      : ""}
+                  </button>
+                  {selectedPackageIds.length ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedPackageIds([]);
+                        setCopyLinksMsg(null);
+                      }}
+                      className="rounded-lg border border-[var(--line)] px-3 py-2 text-sm font-semibold text-white hover:border-[var(--blue)]"
+                    >
+                      Clear
+                    </button>
+                  ) : null}
+                  <span className="text-xs text-[var(--ink-soft)]">
+                    {copyLinksMsg ||
+                      "Check jobs with a ready package.json, then copy."}
+                  </span>
+                </div>
 
                 <div className="mt-8 space-y-5">
                   {doneDayGroups.length === 0 ? (
@@ -861,49 +945,88 @@ export default function Home() {
                           </button>
                           {open ? (
                             <div className="space-y-2 px-3 py-3">
-                              {day.jobs.map((job) => (
-                                <button
-                                  key={job.id}
-                                  type="button"
-                                  onClick={() => openJob(job.id)}
-                                  className="click-row flex w-full flex-col gap-2 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-4 py-4 text-left"
-                                >
-                                  <JobBudgetBar
-                                    googleCount={job.googleCount}
-                                    aiCount={job.aiCount}
-                                    sceneCount={job.sceneCount}
-                                  />
-                                  <div className="flex w-full items-center gap-4">
-                                    <div className="min-w-0 flex-1">
-                                      <p className="truncate text-base font-semibold text-white">
-                                        {job.title || "Untitled"}
-                                      </p>
-                                      <p className="mt-1 text-xs text-[var(--ink-soft)]">
-                                        {nicheLabel(job.niche)}
-                                        {job.status === "failed"
-                                          ? ` · ${job.error || "Failed"}`
-                                          : job.packageReady
-                                            ? " · package ready"
-                                            : job.packageError
-                                              ? " · package pending"
-                                              : ""}
-                                      </p>
-                                    </div>
-                                    <span
-                                      className={`rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide uppercase ${
-                                        job.status === "failed"
-                                          ? "bg-[rgba(248,113,113,0.12)] text-[var(--danger)]"
-                                          : "bg-[rgba(52,211,153,0.12)] text-[var(--ok)]"
+                              {day.jobs.map((job) => {
+                                const canSelect = Boolean(
+                                  job.packageReady && job.packageUrl,
+                                );
+                                const selected = selectedPackageIds.includes(
+                                  job.id,
+                                );
+                                return (
+                                  <div
+                                    key={job.id}
+                                    className={`flex items-stretch gap-2 rounded-xl border bg-[var(--panel-2)] px-3 py-3 ${
+                                      selected
+                                        ? "border-[rgba(96,165,250,0.55)]"
+                                        : "border-[var(--line)]"
+                                    }`}
+                                  >
+                                    <label
+                                      className={`flex shrink-0 items-center px-1 ${
+                                        canSelect
+                                          ? "cursor-pointer"
+                                          : "cursor-not-allowed opacity-30"
                                       }`}
+                                      title={
+                                        canSelect
+                                          ? "Select package JSON link"
+                                          : "No package URL yet"
+                                      }
+                                      onClick={(e) => e.stopPropagation()}
                                     >
-                                      {statusLabel(job.status)}
-                                    </span>
-                                    <span className="chevron shrink-0 text-sm font-semibold text-[var(--ink-soft)]">
-                                      Open →
-                                    </span>
+                                      <input
+                                        type="checkbox"
+                                        className="h-4 w-4 accent-[var(--blue)]"
+                                        disabled={!canSelect}
+                                        checked={selected}
+                                        onChange={() =>
+                                          togglePackageSelect(job.id)
+                                        }
+                                      />
+                                    </label>
+                                    <button
+                                      type="button"
+                                      onClick={() => openJob(job.id)}
+                                      className="click-row flex min-w-0 flex-1 flex-col gap-2 text-left"
+                                    >
+                                      <JobBudgetBar
+                                        googleCount={job.googleCount}
+                                        aiCount={job.aiCount}
+                                        sceneCount={job.sceneCount}
+                                      />
+                                      <div className="flex w-full items-center gap-4">
+                                        <div className="min-w-0 flex-1">
+                                          <p className="truncate text-base font-semibold text-white">
+                                            {job.title || "Untitled"}
+                                          </p>
+                                          <p className="mt-1 text-xs text-[var(--ink-soft)]">
+                                            {nicheLabel(job.niche)}
+                                            {job.status === "failed"
+                                              ? ` · ${job.error || "Failed"}`
+                                              : job.packageReady
+                                                ? " · package ready"
+                                                : job.packageError
+                                                  ? " · package pending"
+                                                  : ""}
+                                          </p>
+                                        </div>
+                                        <span
+                                          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide uppercase ${
+                                            job.status === "failed"
+                                              ? "bg-[rgba(248,113,113,0.12)] text-[var(--danger)]"
+                                              : "bg-[rgba(52,211,153,0.12)] text-[var(--ok)]"
+                                          }`}
+                                        >
+                                          {statusLabel(job.status)}
+                                        </span>
+                                        <span className="chevron shrink-0 text-sm font-semibold text-[var(--ink-soft)]">
+                                          Open →
+                                        </span>
+                                      </div>
+                                    </button>
                                   </div>
-                                </button>
-                              ))}
+                                );
+                              })}
                             </div>
                           ) : null}
                         </div>
