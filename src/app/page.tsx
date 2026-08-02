@@ -50,6 +50,7 @@ type JobListItem = {
   aiBatch?: boolean;
   aiBatchId?: string | null;
   createdAt: string;
+  completedAt?: string | null;
 };
 
 function nicheLabel(id?: string | null) {
