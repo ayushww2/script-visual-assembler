@@ -129,6 +129,7 @@ export async function scanSceneBatch(
   const completion = await client.chat.completions.create({
     model,
     temperature: 0.1,
+    stream: false,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: SCAN_SYSTEM },
@@ -207,6 +208,7 @@ export async function scanSceneBatchText(
   const completion = await client.chat.completions.create({
     model,
     temperature: 0.1,
+    stream: false,
     response_format: { type: "json_object" },
     messages: [
       {
@@ -270,8 +272,8 @@ export async function scanAllScenesText(
   scenes: SceneScanInput[],
   opts?: { batchSize?: number; concurrency?: number },
 ): Promise<SceneScanResult> {
-  const batchSize = Math.max(1, opts?.batchSize ?? 30);
-  const concurrency = Math.max(1, opts?.concurrency ?? 2);
+  const batchSize = Math.max(1, opts?.batchSize ?? 10);
+  const concurrency = Math.max(1, opts?.concurrency ?? 1);
   const batches: SceneScanInput[][] = [];
   for (let i = 0; i < scenes.length; i += batchSize) {
     batches.push(scenes.slice(i, i + batchSize));
