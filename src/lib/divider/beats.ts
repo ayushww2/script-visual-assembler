@@ -1,4 +1,5 @@
 import type { Beat } from "./schema";
+import { getNiche, type NicheId } from "@/lib/niches";
 
 type WhisperSegment = {
   id?: string | number;
@@ -7,22 +8,43 @@ type WhisperSegment = {
   end?: number;
 };
 
+export type ParseBeatsOptions = {
+  nicheId?: string | null;
+  /** Override WPM for niche-aware pacing (celebrity calm cuts). */
+  wpm?: number;
+};
+
 /**
  * Accepts:
  * - plain script text
  * - Whisper-style JSON: { segments: [{ id, text, start, end }] }
  * - raw JSON array of segments
  *
- * Plain script pacing (160 WPM):
+ * Mystery plain-script pacing (160 WPM) — UNCHANGED:
  * - First ~100 words: fast cuts (≈2–4s → ~5–11 words), keep short punch lines alone
  * - Rest: target ~11 words (~4.1s), clamp 8–15 when merging
+ *
+ * Celebrity plain-script pacing (130 WPM experiment):
+ * - Calm ~4–7s scenes driven by the script
+ * - Never cut mid-sentence; merge short sentences when it still fits ~4–7s
  */
-export function parseBeats(input: string): Beat[] {
+export function parseBeats(
+  input: string,
+  opts?: ParseBeatsOptions,
+): Beat[] {
   const trimmed = input.trim();
   if (!trimmed) return [];
 
   const fromJson = tryParseWhisper(trimmed);
   if (fromJson) return fromJson;
+
+  const nicheId = (opts?.nicheId || undefined) as NicheId | undefined;
+  const niche = getNiche(nicheId);
+  const wpm = opts?.wpm || niche.wpm;
+
+  if (niche.id === "celebrity") {
+    return splitScriptTextCelebrity(trimmed, wpm);
+  }
 
   return splitScriptText(trimmed);
 }
@@ -56,6 +78,7 @@ function tryParseWhisper(raw: string): Beat[] | null {
   }
 }
 
+/** Mystery path — keep historical behavior exactly. */
 function splitScriptText(script: string): Beat[] {
   const normalized = script.replace(/\r\n/g, "\n").trim();
   const paragraphs = normalized
@@ -81,6 +104,118 @@ function splitScriptText(script: string): Beat[] {
     id: `b${i + 1}`,
     text,
   }));
+}
+
+/**
+ * Celebrity experiment: sentence-boundary scenes sized from WPM.
+ * Target calm 4–7 seconds; never slice a sentence in the middle.
+ */
+function splitScriptTextCelebrity(script: string, wpm: number): Beat[] {
+  const wps = Math.max(1, wpm) / 60;
+  const minWords = Math.max(4, Math.ceil(4 * wps));
+  const maxWords = Math.max(minWords + 1, Math.floor(7 * wps));
+  const targetWords = Math.round((minWords + maxWords) / 2);
+
+  const normalized = script.replace(/\r\n/g, "\n").trim();
+  const paragraphs = normalized
+    .split(/\n+/)
+    .map((p) => p.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  const sentences: string[] = [];
+  for (const p of paragraphs) {
+    sentences.push(...splitSentences(p));
+  }
+
+  const units: string[] = [];
+  let buf: string[] = [];
+  let bufWords = 0;
+
+  const flush = () => {
+    if (!buf.length) return;
+    units.push(buf.join(" "));
+    buf = [];
+    bufWords = 0;
+  };
+
+  // Soft ceiling (~10s) for absorbing a trailing short line so we don't
+  // leave punchy fragments as their own scene.
+  const hardMaxWords = Math.max(maxWords + 1, Math.floor(10 * wps));
+
+  for (const sentence of sentences) {
+    const wc = wordCount(sentence);
+    if (!wc) continue;
+
+    // Oversized sentence stays intact as its own scene.
+    if (wc > maxWords && bufWords === 0) {
+      units.push(sentence);
+      continue;
+    }
+
+    if (bufWords > 0 && bufWords + wc > maxWords) {
+      // Prefer absorbing into the next sentence when the buffer is still short.
+      if (!(bufWords < minWords && bufWords + wc <= hardMaxWords)) {
+        flush();
+      }
+    }
+
+    buf.push(sentence);
+    bufWords += wc;
+
+    // Flush when we reach a calm target, or a question that already feels complete.
+    if (
+      bufWords >= targetWords ||
+      (bufWords >= minWords && /[?]$/.test(sentence.trim()))
+    ) {
+      flush();
+    }
+  }
+  flush();
+
+  const paced = rebalanceCelebrityUnits(units, minWords, hardMaxWords);
+
+  return paced.map((text, i) => ({
+    id: `b${i + 1}`,
+    text,
+  }));
+}
+
+/** Merge leftover short celebrity units into neighbors (never split). */
+function rebalanceCelebrityUnits(
+  units: string[],
+  minWords: number,
+  hardMaxWords: number,
+): string[] {
+  if (units.length < 2) return units;
+  const out = [...units];
+  let i = 0;
+  while (i < out.length) {
+    const wc = wordCount(out[i]);
+    if (wc >= minWords) {
+      i += 1;
+      continue;
+    }
+    const prev = i > 0 ? out[i - 1] : null;
+    const next = i + 1 < out.length ? out[i + 1] : null;
+    const prevWc = prev ? wordCount(prev) : Infinity;
+    const nextWc = next ? wordCount(next) : Infinity;
+
+    const canPrev = prev && prevWc + wc <= hardMaxWords;
+    const canNext = next && nextWc + wc <= hardMaxWords;
+
+    if (canPrev && (!canNext || prevWc <= nextWc)) {
+      out[i - 1] = `${prev} ${out[i]}`;
+      out.splice(i, 1);
+      continue;
+    }
+    if (canNext) {
+      out[i] = `${out[i]} ${next}`;
+      out.splice(i + 1, 1);
+      continue;
+    }
+    i += 1;
+  }
+  return out;
 }
 
 function chunkLongText(text: string): string[] {

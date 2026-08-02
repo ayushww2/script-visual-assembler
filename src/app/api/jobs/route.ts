@@ -41,7 +41,7 @@ export async function POST(req: Request) {
       script?: string;
       title?: string;
       niche?: string;
-      phase?: "google-first" | "full" | "ai-only";
+      phase?: "google-first" | "full" | "ai-only" | "google-only";
       /** Total VO length in seconds (e.g. 1575 for 26:15). Scene times rescale to fit. */
       voiceoverDurationSec?: number;
       /** Optional "MM:SS" or "H:MM:SS" shorthand. */
@@ -66,11 +66,15 @@ export async function POST(req: Request) {
       );
     }
 
-    const phase: "google-first" | "full" | "ai-only" = body.forceAllAi
-      ? "ai-only"
-      : body.phase === "ai-only" || body.phase === "full"
-        ? body.phase
-        : "google-first";
+    // Celebrity experiment is Google-only unless explicitly all-AI.
+    const phase: "google-first" | "full" | "ai-only" | "google-only" =
+      body.forceAllAi
+        ? "ai-only"
+        : body.phase === "google-only" || niche === "celebrity"
+          ? "google-only"
+          : body.phase === "ai-only" || body.phase === "full"
+            ? body.phase
+            : "google-first";
 
     const usedToday = await countTodaysPreviewQueries();
     if (!body.forceAllAi && phase !== "ai-only" && usedToday >= DAILY_QUERY_SOFT_LIMIT) {
@@ -92,7 +96,7 @@ export async function POST(req: Request) {
       body.voiceoverDuration,
     );
 
-    const aiBatch = Boolean(body.aiBatch);
+    const aiBatch = phase === "google-only" ? false : Boolean(body.aiBatch);
     const job = await prisma.job.create({
       data: {
         title: body.title?.trim() || deriveJobTitle(script),
@@ -100,13 +104,16 @@ export async function POST(req: Request) {
         script,
         phase,
         status: "queued",
-        progress: phase === "ai-only"
-          ? aiBatch
-            ? "Queued — all AI · Batch mode (50% off, up to 24h)…"
-            : "Queued — all AI · realtime gpt-image-2…"
-          : aiBatch
-            ? "Queued — AI Batch mode (50% cheaper, up to 24h)…"
-            : "Queued — cloud worker will claim shortly…",
+        progress:
+          phase === "ai-only"
+            ? aiBatch
+              ? "Queued — all AI · Batch mode (50% off, up to 24h)…"
+              : "Queued — all AI · realtime gpt-image-2…"
+            : phase === "google-only"
+              ? "Queued — Google-only celebrity experiment…"
+              : aiBatch
+                ? "Queued — AI Batch mode (50% cheaper, up to 24h)…"
+                : "Queued — cloud worker will claim shortly…",
         voiceoverDurationSec,
         aiBatch,
       },

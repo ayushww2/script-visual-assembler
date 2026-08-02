@@ -39,7 +39,7 @@ export async function POST(req: Request) {
         script?: string;
         title?: string;
         niche?: string;
-        phase?: "google-first" | "full" | "ai-only";
+        phase?: "google-first" | "full" | "ai-only" | "google-only";
         voiceoverDurationSec?: number;
         voiceoverDuration?: string;
         aiBatch?: boolean;
@@ -48,7 +48,7 @@ export async function POST(req: Request) {
       niche?: string;
       aiBatch?: boolean;
       forceAllAi?: boolean;
-      phase?: "google-first" | "full" | "ai-only";
+      phase?: "google-first" | "full" | "ai-only" | "google-only";
     };
 
     const items = Array.isArray(body.jobs) ? body.jobs : [];
@@ -66,11 +66,14 @@ export async function POST(req: Request) {
     }
 
     const defaultForceAllAi = Boolean(body.forceAllAi);
-    const defaultPhase: "google-first" | "full" | "ai-only" = defaultForceAllAi
-      ? "ai-only"
-      : body.phase === "ai-only" || body.phase === "full"
-        ? body.phase
-        : "google-first";
+    const defaultPhase: "google-first" | "full" | "ai-only" | "google-only" =
+      defaultForceAllAi
+        ? "ai-only"
+        : body.phase === "google-only"
+          ? "google-only"
+          : body.phase === "ai-only" || body.phase === "full"
+            ? body.phase
+            : "google-first";
 
     const usedToday = await countTodaysPreviewQueries();
     if (defaultPhase !== "ai-only" && usedToday >= DAILY_QUERY_SOFT_LIMIT) {
@@ -106,17 +109,24 @@ export async function POST(req: Request) {
       }
 
       const niche = isValidNiche(item.niche) ? item.niche : defaultNiche;
-      const aiBatch =
-        item.aiBatch !== undefined ? Boolean(item.aiBatch) : defaultAiBatch;
       const forceAllAi =
         item.forceAllAi !== undefined
           ? Boolean(item.forceAllAi)
           : defaultForceAllAi;
-      const phase: "google-first" | "full" | "ai-only" = forceAllAi
-        ? "ai-only"
-        : item.phase === "ai-only" || item.phase === "full"
-          ? item.phase
-          : defaultPhase;
+      const phase: "google-first" | "full" | "ai-only" | "google-only" =
+        forceAllAi
+          ? "ai-only"
+          : item.phase === "google-only" || niche === "celebrity"
+            ? "google-only"
+            : item.phase === "ai-only" || item.phase === "full"
+              ? item.phase
+              : defaultPhase;
+      const aiBatch =
+        phase === "google-only"
+          ? false
+          : item.aiBatch !== undefined
+            ? Boolean(item.aiBatch)
+            : defaultAiBatch;
       const voiceoverDurationSec = parseVoiceoverDuration(
         item.voiceoverDurationSec,
         item.voiceoverDuration,
@@ -135,9 +145,11 @@ export async function POST(req: Request) {
                 ? aiBatch
                   ? "Queued — all AI · Batch mode (50% off, up to 24h)…"
                   : "Queued — all AI · realtime gpt-image-2…"
-                : aiBatch
-                  ? "Queued — AI Batch mode (50% cheaper, up to 24h)…"
-                  : "Queued — cloud worker will claim shortly…",
+                : phase === "google-only"
+                  ? "Queued — Google-only celebrity experiment…"
+                  : aiBatch
+                    ? "Queued — AI Batch mode (50% cheaper, up to 24h)…"
+                    : "Queued — cloud worker will claim shortly…",
             voiceoverDurationSec,
             aiBatch,
           },

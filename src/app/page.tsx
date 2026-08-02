@@ -36,6 +36,14 @@ const NICHES: NicheOption[] = [
     description:
       "Clean documentary evidence — maps, artifacts, archives, places, soft investigative tone. VO locked at 160 WPM.",
   },
+  {
+    id: "celebrity",
+    label: "Celebrity",
+    version: "v1-exp",
+    wpm: 130,
+    description:
+      "EXPERIMENT — Google Images only at 130 WPM. Entity-locked people/places. Calm ~4–7s scenes from the script. Mystery unchanged.",
+  },
 ];
 
 type JobListItem = {
@@ -238,21 +246,25 @@ export default function Home() {
   );
 
   const submitEstimates = useMemo(() => {
-    const mode = forceAllAi ? "ai-only" : "google-first";
+    const mode = forceAllAi
+      ? "ai-only"
+      : niche === "celebrity"
+        ? "google-only"
+        : "google-first";
     if (batchFiles.length > 0) {
       return batchFiles.map((f) => ({
         title: f.title,
-        estimate: estimateJobCosts({ script: f.script, mode }),
+        estimate: estimateJobCosts({ script: f.script, mode, nicheId: niche }),
       }));
     }
     if (!script.trim()) return [] as Array<{ title: string; estimate: JobCostEstimate }>;
     return [
       {
         title: title.trim() || "Untitled",
-        estimate: estimateJobCosts({ script, mode }),
+        estimate: estimateJobCosts({ script, mode, nicheId: niche }),
       },
     ];
-  }, [batchFiles, script, title, forceAllAi]);
+  }, [batchFiles, script, title, forceAllAi, niche]);
 
   const submitTotals = useMemo(() => {
     const scenes = submitEstimates.reduce((n, e) => n + e.estimate.scenes, 0);
@@ -451,9 +463,13 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             niche,
-            phase: forceAllAi ? "ai-only" : "google-first",
-            forceAllAi,
-            aiBatch,
+            phase: forceAllAi
+              ? "ai-only"
+              : niche === "celebrity"
+                ? "google-only"
+                : "google-first",
+            forceAllAi: niche === "celebrity" ? false : forceAllAi,
+            aiBatch: niche === "celebrity" ? false : aiBatch,
             jobs: batchFiles.map((f) => ({
               script: f.script,
               title: f.title,
@@ -497,9 +513,13 @@ export default function Home() {
           script,
           title: title.trim() || undefined,
           niche,
-          phase: forceAllAi ? "ai-only" : "google-first",
-          forceAllAi,
-          aiBatch,
+          phase: forceAllAi
+            ? "ai-only"
+            : niche === "celebrity"
+              ? "google-only"
+              : "google-first",
+          forceAllAi: niche === "celebrity" ? false : forceAllAi,
+          aiBatch: niche === "celebrity" ? false : aiBatch,
         }),
       });
       const json = (await res.json()) as {
@@ -809,10 +829,25 @@ export default function Home() {
 
               <Panel title="Visual mode & AI pricing">
                 <div className="space-y-3">
-                  <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-4 py-4">
+                  {niche === "celebrity" ? (
+                    <div className="rounded-xl border border-[rgba(251,191,36,0.35)] bg-[rgba(251,191,36,0.1)] px-4 py-4 text-sm leading-relaxed text-amber-100">
+                      Celebrity experiment: <strong>Google Images only</strong> at
+                      130 WPM. Entity-locked people/places. Calm ~4–7s scenes from
+                      the script (no mid-sentence cuts). No AI stills. Mystery
+                      niche is unchanged.
+                    </div>
+                  ) : null}
+                  <label
+                    className={`flex items-start gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-4 py-4 ${
+                      niche === "celebrity"
+                        ? "cursor-not-allowed opacity-45"
+                        : "cursor-pointer"
+                    }`}
+                  >
                     <input
                       type="checkbox"
-                      checked={forceAllAi}
+                      checked={niche === "celebrity" ? false : forceAllAi}
+                      disabled={niche === "celebrity"}
                       onChange={(e) => setForceAllAi(e.target.checked)}
                       className="mt-1 h-4 w-4 accent-[var(--blue)]"
                     />
@@ -828,10 +863,17 @@ export default function Home() {
                     </span>
                   </label>
 
-                  <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-4 py-4">
+                  <label
+                    className={`flex items-start gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-4 py-4 ${
+                      niche === "celebrity"
+                        ? "cursor-not-allowed opacity-45"
+                        : "cursor-pointer"
+                    }`}
+                  >
                     <input
                       type="checkbox"
-                      checked={aiBatch}
+                      checked={niche === "celebrity" ? false : aiBatch}
+                      disabled={niche === "celebrity"}
                       onChange={(e) => setAiBatch(e.target.checked)}
                       className="mt-1 h-4 w-4 accent-[var(--blue)]"
                     />
@@ -1232,14 +1274,20 @@ function JobBudgetBar({
         <span className="rounded-md border border-[rgba(251,191,36,0.35)] bg-[rgba(251,191,36,0.12)] px-2 py-0.5 text-amber-200">
           all AI
         </span>
+      ) : phase === "google-only" ? (
+        <span className="rounded-md border border-[rgba(251,191,36,0.35)] bg-[rgba(251,191,36,0.12)] px-2 py-0.5 text-amber-200">
+          {g} Google only
+        </span>
       ) : (
         <span className="rounded-md border border-[rgba(96,165,250,0.35)] bg-[rgba(59,130,246,0.14)] px-2 py-0.5 text-[var(--blue-bright)]">
           {g} Google queries
         </span>
       )}
-      <span className="rounded-md border border-[rgba(52,211,153,0.3)] bg-[rgba(52,211,153,0.1)] px-2 py-0.5 text-[var(--ok)]">
-        {a} AI images
-      </span>
+      {phase === "google-only" ? null : (
+        <span className="rounded-md border border-[rgba(52,211,153,0.3)] bg-[rgba(52,211,153,0.1)] px-2 py-0.5 text-[var(--ok)]">
+          {a} AI images
+        </span>
+      )}
       {s > 0 ? (
         <span className="text-[var(--ink-soft)]">{s} scenes</span>
       ) : null}

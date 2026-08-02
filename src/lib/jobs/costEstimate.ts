@@ -13,7 +13,7 @@ export const GPT_IMAGE2_BATCH_USD = Math.max(
     GPT_IMAGE2_REALTIME_USD * 0.5,
 );
 
-export type VisualMode = "google-first" | "ai-only";
+export type VisualMode = "google-first" | "ai-only" | "google-only";
 
 export type JobCostEstimate = {
   scenes: number;
@@ -26,9 +26,12 @@ export type JobCostEstimate = {
   mode: VisualMode;
 };
 
-export function estimateSceneCount(script: string): number {
+export function estimateSceneCount(
+  script: string,
+  nicheId?: string | null,
+): number {
   try {
-    return parseBeats(script || "").length;
+    return parseBeats(script || "", { nicheId }).length;
   } catch {
     return 0;
   }
@@ -38,20 +41,27 @@ export function estimateSceneCount(script: string): number {
  * Pre-submit cost estimate.
  * google-first: ~28% of scenes as AI, hard-capped at MAX_AI_STILLS_PER_JOB.
  * ai-only: every scene is AI (no Google).
+ * google-only: zero AI stills (celebrity experiment).
  */
 export function estimateJobCosts(input: {
   script: string;
   mode?: VisualMode;
+  nicheId?: string | null;
   /** Override scene count (e.g. known beatCount). */
   scenes?: number;
   /** Override AI still count (e.g. known aiCount after divide). */
   aiStills?: number;
 }): JobCostEstimate {
-  const mode: VisualMode = input.mode === "ai-only" ? "ai-only" : "google-first";
+  const mode: VisualMode =
+    input.mode === "ai-only"
+      ? "ai-only"
+      : input.mode === "google-only"
+        ? "google-only"
+        : "google-first";
   const scenes =
     typeof input.scenes === "number" && input.scenes > 0
       ? input.scenes
-      : estimateSceneCount(input.script);
+      : estimateSceneCount(input.script, input.nicheId);
   const aiCap = MAX_AI_STILLS_PER_JOB;
 
   let aiStills: number;
@@ -59,6 +69,8 @@ export function estimateJobCosts(input: {
     aiStills = input.aiStills;
   } else if (mode === "ai-only") {
     aiStills = scenes;
+  } else if (mode === "google-only") {
+    aiStills = 0;
   } else {
     aiStills = Math.min(aiCap, Math.max(0, Math.round(scenes * 0.28)));
   }

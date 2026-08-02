@@ -10,6 +10,8 @@ import { DIRECTOR_BATCH_CONCURRENCY } from "@/lib/jobs/limits";
 import { forceNamedEntitiesToGoogle } from "@/lib/divider/namedEntity";
 import { forceGoogleFirstSubjects } from "@/lib/divider/googleFirst";
 import { applyVisualBudget } from "@/lib/divider/budget";
+import { forceAllBeatsToGoogle } from "@/lib/divider/googleOnly";
+import { getNiche } from "@/lib/niches";
 
 const DIRECTOR_BATCH_SIZE = 40;
 
@@ -31,7 +33,7 @@ function extractJson(text: string): unknown {
 
 async function runDirectorBatch(input: {
   beats: Beat[];
-  phase: "google-first" | "full";
+  phase: "google-first" | "full" | "google-only";
   niche?: string | null;
   batchIndex: number;
   batchCount: number;
@@ -45,7 +47,7 @@ async function runDirectorBatch(input: {
   const client = createContactBoxClient();
   const userPrompt = buildDirectorUserPrompt(
     input.beats,
-    input.phase,
+    input.phase === "google-only" ? "google-only" : input.phase,
     input.niche,
     {
       batchIndex: input.batchIndex,
@@ -80,7 +82,7 @@ async function runDirectorBatch(input: {
 
 export async function runScriptDivider(input: {
   script: string;
-  phase?: "google-first" | "full" | "ai-only";
+  phase?: "google-first" | "full" | "ai-only" | "google-only";
   niche?: string | null;
 }): Promise<{
   beats: Beat[];
@@ -88,12 +90,22 @@ export async function runScriptDivider(input: {
   model: string;
   usage?: { inputTokens?: number; outputTokens?: number };
 }> {
-  const beats = parseBeats(input.script);
+  const niche = getNiche(input.niche);
+  const beats = parseBeats(input.script, {
+    nicheId: niche.id,
+    wpm: niche.wpm,
+  });
   if (beats.length < 1) {
     throw new Error("No beats found. Paste a script or Whisper JSON.");
   }
 
-  const phase = input.phase ?? "google-first";
+  // Celebrity experiment defaults to Google-only unless explicitly all-AI.
+  const phase =
+    input.phase === "ai-only"
+      ? "ai-only"
+      : input.phase === "google-only" || niche.id === "celebrity"
+        ? "google-only"
+        : (input.phase ?? "google-first");
 
   // All-AI mode: skip director Google packs — every beat is an AI still.
   if (phase === "ai-only") {
@@ -127,13 +139,20 @@ export async function runScriptDivider(input: {
   let outputTokens = 0;
 
   const dirConcurrency = Math.max(1, DIRECTOR_BATCH_CONCURRENCY);
+  const directorPhase: "google-first" | "full" | "google-only" =
+    phase === "google-only"
+      ? "google-only"
+      : phase === "full"
+        ? "full"
+        : "google-first";
+
   for (let i = 0; i < batches.length; i += dirConcurrency) {
     const slice = batches.slice(i, i + dirConcurrency);
     const results = await Promise.all(
       slice.map((batchBeats, offset) =>
         runDirectorBatch({
           beats: batchBeats,
-          phase,
+          phase: directorPhase,
           niche: input.niche,
           batchIndex: i + offset,
           batchCount: batches.length,
@@ -169,7 +188,7 @@ export async function runScriptDivider(input: {
   }
   merged.googleSearches = Array.from(byQuery.values());
 
-  // Ensure every beat is covered: missing → AI placeholder
+  // Ensure every beat is covered: missing → AI placeholder (or Google later)
   const covered = new Set<string>();
   for (const pack of merged.googleSearches) {
     for (const id of pack.relatedBeatIds) covered.add(id);
@@ -193,7 +212,17 @@ export async function runScriptDivider(input: {
   // Photographable places/objects (tombs, sites, etc.) → Google-first, not AI
   const enforced = forceGoogleFirstSubjects(beats, named);
   // ≤125 Google queries · ≤100 AI · pack ~2 beats/query on large films
-  const budgeted = applyVisualBudget(beats, enforced);
+  let budgeted = applyVisualBudget(beats, enforced);
+
+  // Celebrity / google-only: strip every AI assignment → Google packs
+  if (phase === "google-only") {
+    budgeted = forceAllBeatsToGoogle(beats, budgeted);
+    budgeted = applyVisualBudget(beats, {
+      googleSearches: budgeted.googleSearches,
+      aiGenerate: [],
+    });
+    budgeted = forceAllBeatsToGoogle(beats, budgeted);
+  }
 
   return {
     beats,

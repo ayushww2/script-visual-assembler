@@ -15,18 +15,31 @@ function isNamedRealScene(scene: SceneRecord): boolean {
  * Finalize Google vs AI — NO forced mix %.
  * Keep every successful Google still. AI only fills misses / unassigned.
  * More Google is always better.
+ *
+ * googleOnly: never route misses to AI — reuse a nearby Google still instead.
  */
-export function balanceGoogleAiScenes(scenes: SceneRecord[]): SceneRecord[] {
+export function balanceGoogleAiScenes(
+  scenes: SceneRecord[],
+  opts?: { googleOnly?: boolean },
+): SceneRecord[] {
   if (!scenes.length) return scenes;
+  const googleOnly = Boolean(opts?.googleOnly);
 
-  return scenes.map((scene) => {
+  const balanced = scenes.map((scene) => {
     // Keep any Google hit that already has a still
     if (scene.visualSource === "google" && scene.imageUrl?.trim()) {
       return { ...scene, visualSource: "google" as const };
     }
 
-    // Google assigned but no image → AI fallback
+    // Google assigned but no image
     if (scene.visualSource === "google" && !scene.imageUrl?.trim()) {
+      if (googleOnly) {
+        return {
+          ...scene,
+          visualSource: "google" as const,
+          why: scene.why || "Google miss — will reuse nearby still",
+        };
+      }
       return {
         ...scene,
         visualSource: "ai" as const,
@@ -46,6 +59,13 @@ export function balanceGoogleAiScenes(scenes: SceneRecord[]): SceneRecord[] {
 
     // Already AI
     if (scene.visualSource === "ai") {
+      if (googleOnly) {
+        return {
+          ...scene,
+          visualSource: "google" as const,
+          why: scene.why || "google-only — AI blocked, reuse nearby still",
+        };
+      }
       return {
         ...scene,
         subject: scene.subject || "scene",
@@ -55,8 +75,15 @@ export function balanceGoogleAiScenes(scenes: SceneRecord[]): SceneRecord[] {
       };
     }
 
-    // Unassigned / no image → AI
+    // Unassigned / no image → AI (or Google placeholder in google-only)
     if (!scene.imageUrl?.trim()) {
+      if (googleOnly) {
+        return {
+          ...scene,
+          visualSource: "google" as const,
+          why: scene.why || "google-only — unassigned, reuse nearby still",
+        };
+      }
       return {
         ...scene,
         visualSource: "ai" as const,
@@ -69,6 +96,42 @@ export function balanceGoogleAiScenes(scenes: SceneRecord[]): SceneRecord[] {
     }
 
     return scene;
+  });
+
+  if (!googleOnly) return balanced;
+  return reuseNearbyGoogleStills(balanced);
+}
+
+/** Fill empty Google scenes by copying the nearest successful Google still. */
+export function reuseNearbyGoogleStills(scenes: SceneRecord[]): SceneRecord[] {
+  const withUrl = scenes
+    .map((s, i) => ({ i, url: s.imageUrl?.trim() || "" }))
+    .filter((x) => x.url);
+
+  if (!withUrl.length) return scenes;
+
+  return scenes.map((scene, index) => {
+    if (scene.imageUrl?.trim()) return scene;
+    let best = withUrl[0];
+    let bestDist = Math.abs(best.i - index);
+    for (const cand of withUrl) {
+      const d = Math.abs(cand.i - index);
+      if (d < bestDist) {
+        best = cand;
+        bestDist = d;
+      }
+    }
+    const donor = scenes[best.i];
+    return {
+      ...scene,
+      visualSource: "google" as const,
+      imageUrl: donor.imageUrl,
+      thumbnailUrl: donor.thumbnailUrl || donor.imageUrl,
+      sourceUrl: donor.sourceUrl,
+      sourceDomain: donor.sourceDomain,
+      query: scene.query || donor.query,
+      why: `${scene.why || "google-only"} · reused nearby Google still`,
+    };
   });
 }
 

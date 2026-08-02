@@ -193,6 +193,8 @@ export async function processJob(jobId: string): Promise<void> {
       }
 
       const allAi = job.phase === "ai-only";
+      const googleOnly =
+        job.phase === "google-only" || niche.id === "celebrity";
 
       await prisma.job.update({
         where: { id: jobId },
@@ -201,19 +203,26 @@ export async function processJob(jobId: string): Promise<void> {
           startedAt: job.startedAt ?? new Date(),
           progress: allAi
             ? "All-AI mode — building scene list…"
-            : "Reading script and building Google packs…",
+            : googleOnly
+              ? "Celebrity Google-only — building entity packs…"
+              : "Reading script and building Google packs…",
           error: null,
           packageReady: false,
           packageUrl: null,
           packageError: null,
           aiBatchId: null,
+          ...(googleOnly && !allAi ? { phase: "google-only" } : {}),
         },
       });
 
       const divided = await runScriptDivider({
         script: job.script,
-        phase:
-          (job.phase as "google-first" | "full" | "ai-only") || "google-first",
+        phase: allAi
+          ? "ai-only"
+          : googleOnly
+            ? "google-only"
+            : (job.phase as "google-first" | "full" | "ai-only" | "google-only") ||
+              "google-first",
         niche: job.niche,
       });
 
@@ -311,8 +320,9 @@ export async function processJob(jobId: string): Promise<void> {
         voiceoverDurationSec: job.voiceoverDurationSec,
       });
 
-      // Keep all successful Google stills — no forced mix %. AI fills misses only.
-      scenes = balanceGoogleAiScenes(scenes);
+      // Keep all successful Google stills — no forced mix %. AI fills misses only
+      // (except google-only / celebrity, which reuses nearby Google stills).
+      scenes = balanceGoogleAiScenes(scenes, { googleOnly });
 
       // Bad Google still → next image from SAME search (no new query)
       const reviewed = reviewAndRepickFromSameSearch({ scenes, previews });
@@ -321,6 +331,10 @@ export async function processJob(jobId: string): Promise<void> {
         await onProgress(
           `Reviewed Google picks · swapped ${reviewed.repaired} from same search…`,
         );
+      }
+
+      if (googleOnly) {
+        scenes = balanceGoogleAiScenes(scenes, { googleOnly: true });
       }
 
       const mix = countSources(scenes);
@@ -333,41 +347,47 @@ export async function processJob(jobId: string): Promise<void> {
           scenesJson: scenes as unknown as Prisma.InputJsonValue,
           sceneCount: scenes.length,
           googleCount: googleQueries,
-          aiCount: mix.ai,
+          aiCount: googleOnly ? 0 : mix.ai,
           previewDone: true,
-          progress: job.aiBatch
-            ? `Scenes ${scenes.length} · ${googleQueries} Google queries · ${mix.ai} AI — Batch…`
-            : `Scenes ${scenes.length} · ${googleQueries} Google queries · ${mix.ai} AI…`,
+          progress: googleOnly
+            ? `Scenes ${scenes.length} · ${googleQueries} Google queries · 0 AI (google-only)…`
+            : job.aiBatch
+              ? `Scenes ${scenes.length} · ${googleQueries} Google queries · ${mix.ai} AI — Batch…`
+              : `Scenes ${scenes.length} · ${googleQueries} Google queries · ${mix.ai} AI…`,
         },
       });
 
-      scenes = await generateMissingAiStills({
-        jobId: job.id,
-        title: job.title,
-        niche: job.niche,
-        scenes,
-        onProgress,
-        onScenesPersist: async (next) => {
-          await prisma.job.update({
-            where: { id: jobId },
-            data: {
-              scenesJson: next as unknown as Prisma.InputJsonValue,
-              sceneCount: next.length,
-            },
-          });
-        },
-        parts: PARALLEL_PARTS,
-        useBatch: Boolean(job.aiBatch),
-        existingBatchId: job.aiBatchId,
-        onBatchCreated: async (batchId) => {
-          await prisma.job.update({
-            where: { id: jobId },
-            data: { aiBatchId: batchId },
-          });
-        },
-      });
+      if (!googleOnly) {
+        scenes = await generateMissingAiStills({
+          jobId: job.id,
+          title: job.title,
+          niche: job.niche,
+          scenes,
+          onProgress,
+          onScenesPersist: async (next) => {
+            await prisma.job.update({
+              where: { id: jobId },
+              data: {
+                scenesJson: next as unknown as Prisma.InputJsonValue,
+                sceneCount: next.length,
+              },
+            });
+          },
+          parts: PARALLEL_PARTS,
+          useBatch: Boolean(job.aiBatch),
+          existingBatchId: job.aiBatchId,
+          onBatchCreated: async (batchId) => {
+            await prisma.job.update({
+              where: { id: jobId },
+              data: { aiBatchId: batchId },
+            });
+          },
+        });
+      }
 
-      const finalMix = countSources(scenes);
+      const finalMix = googleOnly
+        ? { google: scenes.filter((s) => s.imageUrl).length, ai: 0 }
+        : countSources(scenes);
       await prisma.job.update({
         where: { id: jobId },
         data: {
