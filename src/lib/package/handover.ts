@@ -9,7 +9,9 @@ import { timeChunksAtWpm } from "./timing";
 import {
   downloadAndUploadStill,
   packageJsonKey,
+  stillKey,
 } from "./stills";
+import { maybeCompressStillForRemotion } from "./compressStill";
 import { validateRenderPackage } from "./validate";
 
 export type HandoverInput = {
@@ -51,6 +53,39 @@ function alreadyOnOurR2(url: string): boolean {
   }
 }
 
+/** Download an R2 still, JPEG-recompress if smaller, reupload as .jpg when it wins. */
+async function recompressExistingR2Still(input: {
+  jobId: string;
+  index: number;
+  sourceUrl: string;
+}): Promise<{ url: string; compressed: boolean }> {
+  const res = await fetch(input.sourceUrl, {
+    redirect: "follow",
+    signal: AbortSignal.timeout(25_000),
+    headers: { Accept: "image/*,*/*;q=0.8" },
+  });
+  if (!res.ok) throw new Error(`R2 still HTTP ${res.status}`);
+  const contentType = (res.headers.get("content-type") || "image/jpeg")
+    .split(";")[0]
+    .trim()
+    .toLowerCase();
+  const body = Buffer.from(await res.arrayBuffer());
+  if (!body.byteLength) throw new Error("empty R2 still");
+
+  const optimized = await maybeCompressStillForRemotion(body, contentType);
+  if (!optimized.compressed) {
+    return { url: input.sourceUrl, compressed: false };
+  }
+
+  const key = stillKey(input.jobId, input.index, "jpg");
+  const uploaded = await uploadToR2({
+    key,
+    body: optimized.body,
+    contentType: "image/jpeg",
+  });
+  return { url: uploaded.url, compressed: true };
+}
+
 export async function buildAndUploadRenderPackage(
   input: HandoverInput,
 ): Promise<HandoverResult> {
@@ -82,15 +117,33 @@ export async function buildAndUploadRenderPackage(
   let done = 0;
 
   async function packageOne(scene: SceneRecord) {
-    // AI stills are already on our R2 — skip re-download/re-upload
+    // Already on our R2 (often large AI PNGs): recompress for Remotion only
+    // when JPEG shrinks bytes. Timing / WPM untouched.
     if (scene.imageUrl && alreadyOnOurR2(scene.imageUrl)) {
-      r2BySceneId.set(scene.sceneId, scene.imageUrl);
-      updatedById.set(scene.id, {
-        ...scene,
-        r2Url: scene.imageUrl,
-        imageUrl: scene.imageUrl,
-        thumbnailUrl: scene.imageUrl,
-      });
+      try {
+        const optimized = await recompressExistingR2Still({
+          jobId: input.jobId,
+          index: scene.index,
+          sourceUrl: scene.imageUrl,
+        });
+        const url = optimized.url;
+        r2BySceneId.set(scene.sceneId, url);
+        updatedById.set(scene.id, {
+          ...scene,
+          r2Url: url,
+          imageUrl: url,
+          thumbnailUrl: url,
+        });
+      } catch {
+        // Keep the existing R2 URL if optimize/reupload fails
+        r2BySceneId.set(scene.sceneId, scene.imageUrl);
+        updatedById.set(scene.id, {
+          ...scene,
+          r2Url: scene.imageUrl,
+          imageUrl: scene.imageUrl,
+          thumbnailUrl: scene.imageUrl,
+        });
+      }
       done += 1;
       return;
     }

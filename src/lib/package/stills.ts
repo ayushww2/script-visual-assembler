@@ -1,4 +1,5 @@
 import { uploadToR2 } from "@/lib/r2";
+import { maybeCompressStillForRemotion } from "@/lib/package/compressStill";
 
 export type StillUploadResult = {
   sceneId: string;
@@ -8,6 +9,7 @@ export type StillUploadResult = {
   contentType: string;
   bytes: number;
   sourceUrlUsed: string;
+  compressed?: boolean;
 };
 
 const FETCH_TIMEOUT_MS = 25_000;
@@ -43,21 +45,25 @@ export async function downloadAndUploadStill(input: {
   for (const candidate of candidates) {
     try {
       const fetched = await fetchImageBytes(candidate, input.referer);
-      const ext = extFromContentType(fetched.contentType);
-      const key = stillKey(input.jobId, input.index, ext);
+      const optimized = await maybeCompressStillForRemotion(
+        fetched.body,
+        fetched.contentType,
+      );
+      const key = stillKey(input.jobId, input.index, optimized.ext);
       const uploaded = await uploadToR2({
         key,
-        body: fetched.body,
-        contentType: fetched.contentType,
+        body: optimized.body,
+        contentType: optimized.contentType,
       });
       return {
         sceneId: input.sceneId,
         index: input.index,
         key: uploaded.key,
         url: uploaded.url,
-        contentType: fetched.contentType,
-        bytes: fetched.body.byteLength,
+        contentType: optimized.contentType,
+        bytes: optimized.body.byteLength,
         sourceUrlUsed: candidate,
+        compressed: optimized.compressed,
       };
     } catch (err) {
       errors.push(
@@ -113,14 +119,6 @@ async function fetchImageBytes(
   if (!body.byteLength) throw new Error("empty image body");
   if (body.byteLength > MAX_STILL_BYTES) throw new Error("image too large");
   return { body, contentType };
-}
-
-function extFromContentType(contentType: string): string {
-  if (contentType.includes("png")) return "png";
-  if (contentType.includes("webp")) return "webp";
-  if (contentType.includes("gif")) return "gif";
-  if (contentType.includes("jpeg") || contentType.includes("jpg")) return "jpg";
-  return "jpg";
 }
 
 function uniqueUrls(urls: Array<string | null | undefined>): string[] {
