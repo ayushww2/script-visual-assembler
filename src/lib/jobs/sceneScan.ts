@@ -187,6 +187,130 @@ export async function scanSceneBatch(
   };
 }
 
+export async function scanSceneBatchText(
+  scenes: SceneScanInput[],
+  batchIndex: number,
+  batchCount: number,
+): Promise<{
+  reviews: SceneScanIssue[];
+  usage: { inputTokens: number; outputTokens: number };
+  model: string;
+}> {
+  const { model } = getContactBoxConfig();
+  const client = createContactBoxClient();
+
+  const lines = scenes.map(
+    (s) =>
+      `sceneId=${s.sceneId} index=${s.index}\nwords: ${s.words}\nsource: ${s.visualSource || "?"} · subject: ${s.subject || "—"} · query: ${s.query || "—"}\nimageUrl: ${s.imageUrl}`,
+  );
+
+  const completion = await client.chat.completions.create({
+    model,
+    temperature: 0.1,
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content: `${SCAN_SYSTEM}\n\nYou cannot see images — infer likely mismatches from words vs subject/query/source metadata and common failure patterns (posters, wrong person queries, AI on photographable subjects, imdb/youtube/etsy domains, etc.).`,
+      },
+      {
+        role: "user",
+        content: `Batch ${batchIndex + 1}/${batchCount}. Review ${scenes.length} scenes (metadata only):\n\n${lines.join("\n\n---\n\n")}`,
+      },
+    ],
+  });
+
+  const content = completion.choices[0]?.message?.content;
+  if (!content) throw new Error("Empty scan response");
+
+  const parsed = extractJson(content) as {
+    reviews?: Array<{ sceneId?: string; severity?: string; issue?: string }>;
+  };
+  const byId = new Map(scenes.map((s) => [s.sceneId, s]));
+  const reviews: SceneScanIssue[] = [];
+
+  for (const row of parsed.reviews || []) {
+    const scene = byId.get(String(row.sceneId || ""));
+    if (!scene) continue;
+    const sev =
+      row.severity === "critical" || row.severity === "minor" ? row.severity : "ok";
+    reviews.push({
+      sceneId: scene.sceneId,
+      index: scene.index,
+      severity: sev,
+      issue: (row.issue || "").trim() || (sev === "ok" ? "" : "unspecified mismatch"),
+      words: scene.words,
+      imageUrl: scene.imageUrl,
+    });
+  }
+
+  for (const scene of scenes) {
+    if (reviews.some((r) => r.sceneId === scene.sceneId)) continue;
+    reviews.push({
+      sceneId: scene.sceneId,
+      index: scene.index,
+      severity: "minor",
+      issue: "scan batch did not return a verdict for this scene",
+      words: scene.words,
+      imageUrl: scene.imageUrl,
+    });
+  }
+
+  return {
+    reviews,
+    model,
+    usage: {
+      inputTokens: completion.usage?.prompt_tokens || 0,
+      outputTokens: completion.usage?.completion_tokens || 0,
+    },
+  };
+}
+
+export async function scanAllScenesText(
+  scenes: SceneScanInput[],
+  opts?: { batchSize?: number; concurrency?: number },
+): Promise<SceneScanResult> {
+  const batchSize = Math.max(1, opts?.batchSize ?? 30);
+  const concurrency = Math.max(1, opts?.concurrency ?? 2);
+  const batches: SceneScanInput[][] = [];
+  for (let i = 0; i < scenes.length; i += batchSize) {
+    batches.push(scenes.slice(i, i + batchSize));
+  }
+
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let model = getContactBoxConfig().model;
+  const allReviews: SceneScanIssue[] = [];
+
+  for (let i = 0; i < batches.length; i += concurrency) {
+    const slice = batches.slice(i, i + concurrency);
+    const results = await Promise.all(
+      slice.map((batch, offset) =>
+        scanSceneBatchText(batch, i + offset, batches.length),
+      ),
+    );
+    for (const r of results) {
+      allReviews.push(...r.reviews);
+      inputTokens += r.usage.inputTokens;
+      outputTokens += r.usage.outputTokens;
+      model = r.model;
+    }
+  }
+
+  const issues = allReviews.filter((r) => r.severity !== "ok");
+  return {
+    scanned: scenes.length,
+    issues,
+    ok: scenes.length - issues.length,
+    critical: issues.filter((r) => r.severity === "critical").length,
+    minor: issues.filter((r) => r.severity === "minor").length,
+    usage: { inputTokens, outputTokens },
+    costUsd: costFromUsage(inputTokens, outputTokens),
+    model,
+    batches: batches.length,
+  };
+}
+
 /** Vision-scan scenes in batches (default 1 scene / call for reliability). */
 export async function scanAllScenes(
   scenes: SceneScanInput[],

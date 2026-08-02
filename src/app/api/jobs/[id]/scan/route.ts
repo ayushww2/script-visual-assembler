@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { scanAllScenes, type SceneScanInput } from "@/lib/jobs/sceneScan";
+import { scanAllScenes, scanAllScenesText, type SceneScanInput } from "@/lib/jobs/sceneScan";
 import { getContactBoxConfig } from "@/lib/contactbox";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +13,7 @@ export async function POST(
 ) {
   const { id } = await ctx.params;
   const url = new URL(req.url);
+  const mode = url.searchParams.get("mode") || "vision";
   const start = Math.max(0, Number(url.searchParams.get("start") || 0) || 0);
   const limitParam = url.searchParams.get("limit");
   const limit =
@@ -53,14 +54,18 @@ export async function POST(
       limit !== undefined
         ? withImages.slice(start, start + limit)
         : withImages.slice(start);
-    const result = await scanAllScenes(slice, {
-      batchSize: Math.min(3, slice.length || 1),
-      concurrency: 1,
-    });
+    const result =
+      mode === "text"
+        ? await scanAllScenesText(slice, { batchSize: 30, concurrency: 2 })
+        : await scanAllScenes(slice, {
+            batchSize: Math.min(3, slice.length || 1),
+            concurrency: 1,
+          });
 
     return NextResponse.json({
       jobId: id,
       title: job.title,
+      mode,
       start,
       limit: limit ?? slice.length,
       totalScenes: withImages.length,
