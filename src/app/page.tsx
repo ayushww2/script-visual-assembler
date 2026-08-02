@@ -187,10 +187,14 @@ export default function Home() {
   const [submitting, setSubmitting] = useState(false);
   const [uploadingDocx, setUploadingDocx] = useState(false);
   const [docxName, setDocxName] = useState<string | null>(null);
+  const [batchFiles, setBatchFiles] = useState<
+    Array<{ name: string; title: string; script: string }>
+  >([]);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openDays, setOpenDays] = useState<Record<string, boolean>>({});
   const docxInputRef = useRef<HTMLInputElement>(null);
+  const MAX_BATCH_DOCX = 10;
 
   const dayGroups = useMemo(() => groupJobsByDay(jobs), [jobs]);
   const queueJobs = useMemo(
@@ -260,27 +264,40 @@ export default function Home() {
 
   const scenes = detail?.scenes || [];
 
+  async function readDocxFile(file: File): Promise<{
+    text: string;
+    titleSuggestion?: string;
+    filename: string;
+  }> {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch("/api/script/docx", {
+      method: "POST",
+      body: form,
+    });
+    const json = (await res.json()) as {
+      text?: string;
+      titleSuggestion?: string;
+      filename?: string;
+      error?: string;
+    };
+    if (!res.ok) throw new Error(json.error || `Failed to read ${file.name}`);
+    if (!json.text?.trim()) throw new Error(`No text found in ${file.name}`);
+    return {
+      text: json.text,
+      titleSuggestion: json.titleSuggestion,
+      filename: json.filename || file.name,
+    };
+  }
+
   async function ingestDocx(file: File) {
     setUploadingDocx(true);
     setError(null);
     try {
-      const form = new FormData();
-      form.append("file", file);
-      const res = await fetch("/api/script/docx", {
-        method: "POST",
-        body: form,
-      });
-      const json = (await res.json()) as {
-        text?: string;
-        titleSuggestion?: string;
-        filename?: string;
-        error?: string;
-      };
-      if (!res.ok) throw new Error(json.error || "Failed to read DOCX");
-      if (!json.text?.trim()) throw new Error("No text found in DOCX");
-
+      const json = await readDocxFile(file);
       setScript(json.text);
-      setDocxName(json.filename || file.name);
+      setDocxName(json.filename);
+      setBatchFiles([]);
       if (!title.trim() && json.titleSuggestion) {
         setTitle(json.titleSuggestion);
       }
@@ -292,18 +309,114 @@ export default function Home() {
     }
   }
 
+  async function ingestDocxBatch(fileList: FileList | File[]) {
+    const files = Array.from(fileList).filter((f) =>
+      /\.docx$/i.test(f.name),
+    );
+    if (!files.length) {
+      setError("Only .docx files are supported");
+      return;
+    }
+    if (files.length > MAX_BATCH_DOCX) {
+      setError(`Max ${MAX_BATCH_DOCX} DOCX files at once`);
+      return;
+    }
+
+    setUploadingDocx(true);
+    setError(null);
+    try {
+      const loaded: Array<{ name: string; title: string; script: string }> = [];
+      const fails: string[] = [];
+      for (const file of files) {
+        try {
+          const json = await readDocxFile(file);
+          loaded.push({
+            name: json.filename,
+            title: json.titleSuggestion || json.filename,
+            script: json.text,
+          });
+        } catch (e) {
+          fails.push(
+            e instanceof Error ? e.message : `Failed to read ${file.name}`,
+          );
+        }
+      }
+      if (!loaded.length) {
+        throw new Error(fails[0] || "No DOCX files could be read");
+      }
+      setBatchFiles(loaded);
+      setScript("");
+      setTitle("");
+      setDocxName(null);
+      if (fails.length) {
+        setError(
+          `Loaded ${loaded.length}/${files.length}. Skipped: ${fails.slice(0, 3).join("; ")}`,
+        );
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to read DOCX batch");
+    } finally {
+      setUploadingDocx(false);
+      if (docxInputRef.current) docxInputRef.current.value = "";
+    }
+  }
+
   function onDocxDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
     setDragOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
-    void ingestDocx(file);
+    const list = e.dataTransfer.files;
+    if (!list?.length) return;
+    if (list.length === 1) void ingestDocx(list[0]);
+    else void ingestDocxBatch(list);
   }
 
   async function submitJob() {
     setSubmitting(true);
     setError(null);
     try {
+      if (batchFiles.length > 0) {
+        const res = await fetch("/api/jobs/batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            niche,
+            phase: "google-first",
+            aiBatch,
+            jobs: batchFiles.map((f) => ({
+              script: f.script,
+              title: f.title,
+            })),
+          }),
+        });
+        const json = (await res.json()) as {
+          capacity?: Capacity;
+          created?: number;
+          error?: string;
+          errors?: Array<{ index: number; error: string }>;
+        };
+        if (!res.ok) throw new Error(json.error || "Batch submit failed");
+        if (json.capacity) setCapacity(json.capacity);
+        setBatchFiles([]);
+        setScript("");
+        setTitle("");
+        setNiche("mystery");
+        setAiBatch(false);
+        setDocxName(null);
+        setSelectedId(null);
+        setDetail(null);
+        await loadJobs();
+        setNav("queue");
+        if (json.errors?.length) {
+          setError(
+            `Queued ${json.created || 0}. Some failed: ${json.errors
+              .slice(0, 3)
+              .map((e) => e.error)
+              .join("; ")}`,
+          );
+        }
+        return;
+      }
+
       const res = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -326,6 +439,7 @@ export default function Home() {
       setNiche("mystery");
       setAiBatch(false);
       setDocxName(null);
+      setBatchFiles([]);
       setSelectedId(null);
       setDetail(null);
       await loadJobs();
@@ -498,10 +612,11 @@ export default function Home() {
                   <p className="text-sm font-semibold text-white">
                     {uploadingDocx
                       ? "Reading DOCX…"
-                      : "Drag & drop a .docx script"}
+                      : "Drag & drop .docx scripts"}
                   </p>
                   <p className="mt-1 text-xs text-[var(--ink-soft)]">
-                    We’ll extract the text, then break it into scenes on submit.
+                    One file loads into the editor. Select up to {MAX_BATCH_DOCX}{" "}
+                    files to queue them all at once.
                   </p>
                   <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
                     <button
@@ -510,32 +625,85 @@ export default function Home() {
                       onClick={() => docxInputRef.current?.click()}
                       className="rounded-lg border border-[var(--line)] bg-black/20 px-4 py-2 text-sm font-semibold text-white transition hover:border-[var(--blue)] disabled:opacity-45"
                     >
-                      Choose .docx
+                      Choose .docx (max {MAX_BATCH_DOCX})
                     </button>
                     {docxName ? (
                       <span className="max-w-[220px] truncate text-xs text-[var(--blue-bright)]">
                         Loaded: {docxName}
                       </span>
                     ) : null}
+                    {batchFiles.length ? (
+                      <span className="text-xs text-[var(--blue-bright)]">
+                        Batch ready: {batchFiles.length} scripts
+                      </span>
+                    ) : null}
                   </div>
                   <input
                     ref={docxInputRef}
                     type="file"
+                    multiple
                     accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     className="hidden"
                     onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) void ingestDocx(file);
+                      const list = e.target.files;
+                      if (!list?.length) return;
+                      if (list.length === 1) void ingestDocx(list[0]);
+                      else void ingestDocxBatch(list);
                     }}
                   />
                 </div>
 
-                <textarea
-                  value={script}
-                  onChange={(e) => setScript(e.target.value)}
-                  placeholder="Paste the full documentary script, Whisper JSON, or upload a .docx above…"
-                  className="min-h-[280px] w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--panel-2)] px-4 py-3 text-sm leading-relaxed text-white outline-none placeholder:text-[var(--ink-soft)]/55 focus:border-[var(--blue)]"
-                />
+                {batchFiles.length > 0 ? (
+                  <div className="mb-4 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-4 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-white">
+                        Batch queue · {batchFiles.length}/{MAX_BATCH_DOCX}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setBatchFiles([])}
+                        className="text-xs font-semibold text-[var(--ink-soft)] hover:text-white"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    <ul className="mt-3 max-h-48 space-y-2 overflow-y-auto">
+                      {batchFiles.map((f, i) => (
+                        <li
+                          key={`${f.name}-${i}`}
+                          className="flex items-start justify-between gap-3 text-sm"
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate font-medium text-white">
+                              {i + 1}. {f.title}
+                            </span>
+                            <span className="block truncate text-xs text-[var(--ink-soft)]">
+                              {f.name} · {f.script.length.toLocaleString()} chars
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setBatchFiles((prev) =>
+                                prev.filter((_, idx) => idx !== i),
+                              )
+                            }
+                            className="shrink-0 text-xs text-[var(--ink-soft)] hover:text-[var(--danger)]"
+                          >
+                            Remove
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : (
+                  <textarea
+                    value={script}
+                    onChange={(e) => setScript(e.target.value)}
+                    placeholder="Paste the full documentary script, Whisper JSON, or upload a .docx above…"
+                    className="min-h-[280px] w-full resize-y rounded-lg border border-[var(--line)] bg-[var(--panel-2)] px-4 py-3 text-sm leading-relaxed text-white outline-none placeholder:text-[var(--ink-soft)]/55 focus:border-[var(--blue)]"
+                  />
+                )}
               </Panel>
 
               <Panel title="AI image pricing">
@@ -562,14 +730,24 @@ export default function Home() {
               <button
                 type="button"
                 onClick={submitJob}
-                disabled={submitting || uploadingDocx || !script.trim()}
+                disabled={
+                  submitting ||
+                  uploadingDocx ||
+                  (!script.trim() && batchFiles.length === 0)
+                }
                 className="rounded-xl bg-[var(--blue)] px-6 py-3.5 text-sm font-semibold text-white shadow-[0_10px_28px_rgba(37,99,235,0.35)] transition hover:bg-[var(--blue-deep)] hover:shadow-[0_14px_34px_rgba(37,99,235,0.45)] disabled:opacity-45 disabled:shadow-none"
               >
                 {submitting
                   ? "Submitting…"
-                  : aiBatch
-                    ? "Submit job (Batch / 50% off)"
-                    : "Submit job"}
+                  : batchFiles.length > 1
+                    ? `Queue ${batchFiles.length} jobs`
+                    : batchFiles.length === 1
+                      ? aiBatch
+                        ? "Submit job (Batch / 50% off)"
+                        : "Submit job"
+                      : aiBatch
+                        ? "Submit job (Batch / 50% off)"
+                        : "Submit job"}
               </button>
 
               {error ? (
