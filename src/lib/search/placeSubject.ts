@@ -53,7 +53,10 @@ export function primaryPlaceFromText(
     if (/\btahoe\b/.test(lower)) return "Lake Tahoe ROV";
     return "underwater ROV";
   }
-  if (/\b(lakebed|underwater|deep water|bathymetr)\b/.test(lower) && /\btahoe\b/.test(lower)) {
+  if (
+    /\b(lakebed|underwater|deep water|bathymetr)\b/.test(lower) &&
+    /\btahoe\b/.test(lower)
+  ) {
     return "Lake Tahoe underwater";
   }
 
@@ -64,11 +67,15 @@ export function primaryPlaceFromText(
 export function placeSearchNegatives(placeName?: string | null): string {
   const base =
     "-people -person -couple -wedding -bride -groom -engagement -portrait " +
-    "-tourist -tour -family -swimmer -hiker -selfie -model -dress -suit " +
+    "-tourist -crowd -family -swimmer -hiker -selfie -model -dress -suit " +
+    "-golf -resort -hotel -casino -clubhouse -tournament -villa -pool " +
     "-logo -watermark -text -meme -thumbnail -collage";
   const p = (placeName || "").toLowerCase();
   if (p.includes("tahoe")) {
-    return `${base} -\"micro wedding\" -proposal -elopement -\"tulle skirt\"`;
+    return (
+      `${base} -\"micro wedding\" -proposal -elopement -\"tulle skirt\" ` +
+      "-ritz -hyatt -\"boys and girls\" -edgewood"
+    );
   }
   return base;
 }

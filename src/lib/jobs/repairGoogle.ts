@@ -53,13 +53,14 @@ export async function repairBadGoogleScenes(input: {
       scene.entityContext,
     );
 
+    const underwater = /\b(underwater|beneath|deep|dark|rov|lakebed|vehicle entered|cameras)\b/i.test(
+      `${scene.words} ${scene.subject} ${scene.query}`,
+    );
     let query = (
       placeName
-        ? /\b(underwater|beneath|deep|dark|rov|lakebed)\b/i.test(
-            `${scene.words} ${scene.subject}`,
-          )
-          ? `${placeName} underwater`
-          : `${placeName} aerial landscape`
+        ? underwater
+          ? `${placeName} underwater ROV`
+          : `${placeName} clear blue water aerial mountains`
         : personName
           ? personName
           : scene.query ||

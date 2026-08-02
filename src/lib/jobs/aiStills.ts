@@ -19,9 +19,12 @@ export type AiStillProgress = (message: string) => Promise<void> | void;
 export type AiScenesPersist = (scenes: SceneRecord[]) => Promise<void> | void;
 
 async function existingStillUrl(jobId: string, index: number): Promise<string | null> {
+  const nnn = String(index).padStart(3, "0");
+  // Legacy unhashed keys only (hashed keys are unique per upload).
   for (const ext of ["png", "jpg", "jpeg", "webp"] as const) {
-    const key = stillKey(jobId, index, ext === "jpeg" ? "jpg" : ext);
-    if (await objectExists(key)) return publicUrlForKey(key);
+    const e = ext === "jpeg" ? "jpg" : ext;
+    const legacy = `packages/${jobId}/stills/scene-${nnn}.${e}`;
+    if (await objectExists(legacy)) return publicUrlForKey(legacy);
   }
   return null;
 }
@@ -200,7 +203,7 @@ async function generateMissingAiStillsBatch(
       continue;
     }
     const ext = (hit.contentType || "image/png").includes("jpeg") ? "jpg" : "png";
-    const key = stillKey(input.jobId, scene.index, ext);
+    const key = stillKey(input.jobId, scene.index, ext, hit.bytes);
     const put = await uploadToR2({
       key,
       body: hit.bytes,
@@ -314,7 +317,7 @@ async function generateMissingAiStillsRealtime(
       }
     }
     const ext = image.contentType.includes("jpeg") ? "jpg" : "png";
-    const key = stillKey(input.jobId, scene.index, ext);
+    const key = stillKey(input.jobId, scene.index, ext, image.bytes);
     const uploaded = await uploadToR2({
       key,
       body: image.bytes,
@@ -382,7 +385,7 @@ async function generateMissingAiStillsRealtime(
           }),
         });
         const ext = image.contentType.includes("jpeg") ? "jpg" : "png";
-        const key = stillKey(input.jobId, scene.index, ext);
+        const key = stillKey(input.jobId, scene.index, ext, image.bytes);
         const uploaded = await uploadToR2({
           key,
           body: image.bytes,

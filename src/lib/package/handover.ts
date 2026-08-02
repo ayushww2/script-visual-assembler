@@ -73,17 +73,27 @@ async function recompressExistingR2Still(input: {
   if (!body.byteLength) throw new Error("empty R2 still");
 
   const optimized = await maybeCompressStillForRemotion(body, contentType);
-  if (!optimized.compressed) {
-    return { url: input.sourceUrl, compressed: false };
-  }
-
-  const key = stillKey(input.jobId, input.index, "jpg");
+  // Always re-key with content hash so CDN cannot serve a stale replaced still.
+  const outBody = optimized.compressed ? optimized.body : body;
+  const outType = optimized.compressed
+    ? "image/jpeg"
+    : contentType.startsWith("image/")
+      ? contentType
+      : "image/jpeg";
+  const ext = optimized.compressed
+    ? "jpg"
+    : contentType.includes("png")
+      ? "png"
+      : contentType.includes("webp")
+        ? "webp"
+        : "jpg";
+  const key = stillKey(input.jobId, input.index, ext, outBody);
   const uploaded = await uploadToR2({
     key,
-    body: optimized.body,
-    contentType: "image/jpeg",
+    body: outBody,
+    contentType: outType,
   });
-  return { url: uploaded.url, compressed: true };
+  return { url: uploaded.url, compressed: optimized.compressed };
 }
 
 export async function buildAndUploadRenderPackage(

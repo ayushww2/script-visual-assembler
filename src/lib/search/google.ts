@@ -218,7 +218,7 @@ const GROUP_SHOT_HINTS = [
   "split portrait",
 ];
 
-/** People / wedding stock that must never represent a place or object. */
+/** People / wedding / resort stock that must never represent a wild place. */
 const PEOPLE_IN_PLACE_HINTS = [
   "wedding",
   "bride",
@@ -244,6 +244,18 @@ const PEOPLE_IN_PLACE_HINTS = [
   "people on",
   "man and woman",
   "husband and wife",
+  "golf",
+  "golf course",
+  "resort",
+  "hotel",
+  "casino",
+  "clubhouse",
+  "tournament",
+  "ritz",
+  "hyatt",
+  "villa",
+  "swimming pool",
+  "boys and girls club",
 ];
 
 /** Other celebrities that must not appear when locked to one person. */
@@ -424,20 +436,22 @@ export function withCleanPhotoQuery(
       .trim();
   }
 
-  // Place / object lock — empty landscape or gear, no people
+  // Place / object lock — empty landscape or gear, no people / resorts
   if (place || isPlaceOrObjectName(base)) {
     const p = place || base;
     const placeNeg = placeSearchNegatives(p);
-    let core = p;
     const pl = p.toLowerCase();
-    if (pl.includes("tahoe") && !/underwater|rov|aerial|lakebed/.test(base.toLowerCase())) {
-      core = /underwater|deep|beneath|dark|rov|lakebed/i.test(base)
-        ? "Lake Tahoe underwater ROV"
-        : "Lake Tahoe aerial landscape empty";
-    } else if (!/aerial|landscape|underwater|rov/.test(base.toLowerCase())) {
-      core = `${p} landscape aerial`;
-    } else {
-      core = base;
+    const baseL = base.toLowerCase();
+    let core = base;
+    if (pl.includes("tahoe") || baseL.includes("tahoe")) {
+      if (/underwater|deep|beneath|dark|rov|lakebed|submersible/i.test(baseL)) {
+        core = "Lake Tahoe underwater ROV deep water silt";
+      } else {
+        // Surface beats: pure lake + mountains, not golf/resorts
+        core = "Lake Tahoe clear blue water aerial mountains shoreline empty";
+      }
+    } else if (!/aerial|landscape|underwater|rov/.test(baseL)) {
+      core = `${p} landscape aerial wilderness`;
     }
     return `${core} ${placeNeg}`.replace(/\s+/g, " ").trim();
   }

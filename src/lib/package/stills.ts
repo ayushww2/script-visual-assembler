@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { uploadToR2 } from "@/lib/r2";
 import { maybeCompressStillForRemotion } from "@/lib/package/compressStill";
 
@@ -15,9 +16,21 @@ export type StillUploadResult = {
 const FETCH_TIMEOUT_MS = 25_000;
 const MAX_STILL_BYTES = 12 * 1024 * 1024;
 
-export function stillKey(jobId: string, index: number, ext = "jpg"): string {
+/**
+ * Content-hashed still key so CDN/immutable cache cannot serve a replaced image
+ * (e.g. old wedding still at scene-002.jpg after a place-only repair).
+ */
+export function stillKey(
+  jobId: string,
+  index: number,
+  ext = "jpg",
+  body?: Buffer | Uint8Array | null,
+): string {
   const nnn = String(index).padStart(3, "0");
-  return `packages/${jobId}/stills/scene-${nnn}.${ext}`;
+  const hash = body?.byteLength
+    ? createHash("sha1").update(body).digest("hex").slice(0, 10)
+    : "tmp";
+  return `packages/${jobId}/stills/scene-${nnn}-${hash}.${ext}`;
 }
 
 export function packageJsonKey(jobId: string): string {
@@ -49,7 +62,12 @@ export async function downloadAndUploadStill(input: {
         fetched.body,
         fetched.contentType,
       );
-      const key = stillKey(input.jobId, input.index, optimized.ext);
+      const key = stillKey(
+        input.jobId,
+        input.index,
+        optimized.ext,
+        optimized.body,
+      );
       const uploaded = await uploadToR2({
         key,
         body: optimized.body,
