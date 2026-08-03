@@ -29,6 +29,7 @@ export function toJobListItem(job: Job): JobListItem {
     voiceoverDurationSec: job.voiceoverDurationSec,
     aiBatch: job.aiBatch,
     aiBatchId: job.aiBatchId,
+    reviewStatus: job.reviewStatus,
     createdAt: job.createdAt.toISOString(),
     startedAt: job.startedAt?.toISOString() ?? null,
     completedAt: job.completedAt?.toISOString() ?? null,
@@ -61,5 +62,7 @@ export function toJobDetail(job: Job) {
           })
         : null,
     usage: job.usageJson,
+    reviewStatus: job.reviewStatus,
+    review: job.reviewJson,
   };
 }
