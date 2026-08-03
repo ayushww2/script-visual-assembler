@@ -1,0 +1,2 @@
+ALTER TABLE "Job" ADD COLUMN "reviewStatus" TEXT;
+ALTER TABLE "Job" ADD COLUMN "reviewJson" JSONB;

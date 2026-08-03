@@ -2,8 +2,9 @@ export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   if (!process.env.DATABASE_URL) return;
 
-  try {
+    try {
     const { runJobWorkerLoop } = await import("@/lib/jobs/process");
+    const { runReviewWorkerLoop } = await import("@/lib/jobs/runReview");
 
     // Single awaited worker loop — fire-and-forget + after() were dropping work
     // on Railway before processJob could mark jobs running.
@@ -13,6 +14,9 @@ export async function register() {
       console.log("[jobs] instrumentation register — starting job worker loop");
       void runJobWorkerLoop().catch((error) => {
         console.error("[jobs] worker loop crashed", error);
+      });
+      void runReviewWorkerLoop().catch((error) => {
+        console.error("[review] worker loop crashed", error);
       });
     }
   } catch (error) {

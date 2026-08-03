@@ -36,6 +36,7 @@ export type JobListItem = {
   /** OpenAI Batch API for AI stills (~50% cheaper, up to 24h). */
   aiBatch: boolean;
   aiBatchId: string | null;
+  reviewStatus?: string | null;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
