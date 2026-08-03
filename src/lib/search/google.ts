@@ -102,6 +102,22 @@ const BLOCKED_MEDIA_DOMAINS = [
   "cgtrader.com",
   "sketchfab.com",
   "renderosity.com",
+  // Product / book / listing pages — not documentary stills
+  "amazon.com",
+  "amazon.in",
+  "amazon.co",
+  "media-amazon.com",
+  "ssl-images-amazon.com",
+  "goodreads.com",
+  "barnesandnoble.com",
+  "bookshop.org",
+  "audible.com",
+  "abebooks.com",
+  "ebay.com",
+  "etsy.com",
+  "houzz.com",
+  "wayfair.com",
+  "walmart.com",
 ];
 
 const WATERMARK_URL_HINTS = [
@@ -153,6 +169,14 @@ const TEXT_WATERMARK_HINTS = [
   "blu-ray",
   "magazine cover",
   "book cover",
+  "paperback",
+  "hardcover",
+  "memoir",
+  "audiobook",
+  "kindle",
+  "isbn",
+  "amazon.com",
+  "goodreads",
   "collage",
   "composite",
   "side by side",
@@ -330,15 +354,31 @@ function isBlockedMediaDomain(domainOrUrl?: string): boolean {
   );
 }
 
-function isCleanPhoto(hit: GoogleImageHit): boolean {
+function isCleanPhoto(
+  hit: GoogleImageHit,
+  opts?: { allowPortrait?: boolean },
+): boolean {
   const domain = (hit.sourceDomain || "").toLowerCase();
   const url = (hit.imageUrl || "").toLowerCase();
   if (isBlockedMediaDomain(domain) || isBlockedMediaDomain(url)) return false;
   if (hasWatermarkInUrl(url) || hasWatermarkInUrl(hit.sourcePageUrl)) return false;
   if (hasTextOrWatermarkHints(hit)) return false;
-  if (hit.width && hit.height && hit.width <= hit.height) return false;
-  if (!isLandscape(hit)) return false;
+  // Person stills are often portrait; place/object stills stay landscape-only.
+  if (!opts?.allowPortrait) {
+    if (hit.width && hit.height && hit.width <= hit.height) return false;
+    if (!isLandscape(hit)) return false;
+  }
   return true;
+}
+
+function looksLikeBookOrProduct(hit: GoogleImageHit): boolean {
+  const blob = hitBlob(hit);
+  return (
+    /\b(book cover|paperback|hardcover|memoir|audiobook|kindle|isbn|goodreads|amazon)\b/.test(
+      blob,
+    ) ||
+    /\b(buy now|add to cart|product image|for sale)\b/.test(blob)
+  );
 }
 
 /** True if an already-picked Google scene should be replaced. */
@@ -371,6 +411,27 @@ export function isBadGoogleScenePick(scene: {
     domain.includes("deviantart") ||
     meta.includes("zbrush") ||
     meta.includes("3d sculpt")
+  ) {
+    return true;
+  }
+
+  // Book / product / listing junk (common on celebrity memoir/report queries)
+  if (
+    domain.includes("amazon.") ||
+    domain.includes("media-amazon") ||
+    domain.includes("goodreads") ||
+    domain.includes("barnesandnoble") ||
+    domain.includes("bookshop.org") ||
+    domain.includes("audible.") ||
+    domain.includes("abebooks") ||
+    domain.includes("houzz.com") ||
+    domain.includes("ebay.") ||
+    /\b(book cover|paperback|hardcover|memoir cover|audiobook|kindle)\b/.test(
+      `${meta} ${url}`,
+    ) ||
+    /\b(memoir|autopsy report|toxicology report|coroner report|death report)\b/.test(
+      meta,
+    )
   ) {
     return true;
   }
@@ -597,18 +658,22 @@ export async function searchGoogleImages(
   }
   const q = withCleanPhotoQuery(query, personName, placeName);
 
+  // Person stills are often portrait — don't force wide aspect for people.
+  const allowPortrait = Boolean(personName && !placeName);
   const params = new URLSearchParams({
     engine: "google_images",
     q,
     api_key: apiKey,
     safe: defaults.safe,
-    aspect_ratio: "wide",
     size: defaults.size || "large",
     image_type: "photo",
     nfpr: "1",
     filter: "1",
     num: String(Math.min(40, Math.max(12, num * 3))),
   });
+  if (!allowPortrait) {
+    params.set("aspect_ratio", defaults.aspectRatio || "wide");
+  }
 
   const res = await fetch(`https://www.searchapi.io/api/v1/search?${params}`, {
     method: "GET",
@@ -641,7 +706,8 @@ export async function searchGoogleImages(
   const scored = mapped
     .map((r) => ({ ...r, score: scoreHit(r, defaults, personName, placeName) }))
     .filter((r) => {
-      if (!isCleanPhoto(r)) return false;
+      if (!isCleanPhoto(r, { allowPortrait })) return false;
+      if (looksLikeBookOrProduct(r)) return false;
       if (placeName && hasPeopleInPlaceHit(r)) return false;
       if (personName && isGroupShot(r)) return false;
       if (personName && personMatchScore(r, personName) < 0) return false;
@@ -653,8 +719,9 @@ export async function searchGoogleImages(
   let results = scored;
   if (results.length < 1) {
     results = mapped
-      .filter((r) => isLandscape(r))
-      .filter((r) => isCleanPhoto(r))
+      .filter((r) => allowPortrait || isLandscape(r))
+      .filter((r) => isCleanPhoto(r, { allowPortrait }))
+      .filter((r) => !looksLikeBookOrProduct(r))
       .filter((r) => !placeName || !hasPeopleInPlaceHit(r))
       .filter((r) => !personName || personMatchScore(r, personName) >= 40)
       .map((r) => ({ ...r, score: scoreHit(r, defaults, personName, placeName) }))
@@ -709,10 +776,13 @@ export function pickBestGoogleHit(
     }))
     .sort((a, b) => b.score - a.score);
 
+  const allowPortrait = Boolean(personName && !placeName);
+
   // Strict: clean + full name match + not group/composite / no people on places
   for (const { hit } of ranked) {
     if (usedUrls?.has(hit.imageUrl)) continue;
-    if (!isCleanPhoto(hit)) continue;
+    if (!isCleanPhoto(hit, { allowPortrait })) continue;
+    if (looksLikeBookOrProduct(hit)) continue;
     if (placeName && hasPeopleInPlaceHit(hit)) continue;
     if (personName && isGroupShot(hit)) continue;
     if (personName && mentionsOtherFamousPerson(hit, personName)) continue;
@@ -723,7 +793,8 @@ export function pickBestGoogleHit(
   // Slightly relax: still require full name if person locked; still no people on places
   for (const { hit } of ranked) {
     if (usedUrls?.has(hit.imageUrl)) continue;
-    if (!isCleanPhoto(hit)) continue;
+    if (!isCleanPhoto(hit, { allowPortrait })) continue;
+    if (looksLikeBookOrProduct(hit)) continue;
     if (placeName && hasPeopleInPlaceHit(hit)) continue;
     if (personName && isGroupShot(hit)) continue;
     if (personName && personMatchScore(hit, personName) < 40) continue;

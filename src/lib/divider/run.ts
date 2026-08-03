@@ -216,7 +216,7 @@ export async function runScriptDivider(input: {
   // Google queries and pack less aggressively. Mystery keeps default caps.
   const budgetOpts =
     niche.id === "celebrity" || phase === "google-only"
-      ? { maxGoogle: 180, maxAi: 0, perQuery: 2 }
+      ? { maxGoogle: 320, maxAi: 0, perQuery: 1 }
       : undefined;
 
   let budgeted = applyVisualBudget(beats, enforced, budgetOpts);
