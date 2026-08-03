@@ -88,6 +88,10 @@ type Scene = {
   sourceUrl?: string | null;
   sourceDomain?: string | null;
   r2Url?: string | null;
+  /** Optional Pexels (or other) B-roll clip. */
+  videoUrl?: string | null;
+  videoQuery?: string | null;
+  videoSource?: string | null;
   email?: string | null;
 };
 
@@ -106,6 +110,46 @@ type JobDetail = JobListItem & {
   scenes: Scene[] | null;
   model: string | null;
   packageJson?: unknown;
+  reviewStatus?: string | null;
+  review?: FinalReviewPayload | null;
+};
+
+type FinalReviewIssue = {
+  sceneId: string;
+  index: number;
+  severity: "major" | "minor";
+  category: string;
+  issue: string;
+  words: string;
+  fixType: string;
+  suggestedQuery?: string;
+  startSec?: number;
+  endSec?: number;
+};
+
+type FinalReviewPayload = {
+  version?: number;
+  scannedAt?: string;
+  topic?: string;
+  scanned?: number;
+  majorCount?: number;
+  minorCount?: number;
+  ok?: number;
+  topicSummary?: string;
+  progress?: string;
+  error?: string;
+  majorIssues?: FinalReviewIssue[];
+  repairEstimate?: {
+    googleQueries: number;
+    aiGenerations: number;
+    googleRepicks: number;
+    searchApiUsd: number;
+    aiRealtimeUsd: number;
+    aiBatchUsd: number;
+    totalRepairUsd: number;
+  };
+  scanCostUsd?: number;
+  usage?: { inputTokens: number; outputTokens: number };
 };
 
 type Capacity = {
@@ -317,6 +361,17 @@ export default function Home() {
       setError(e instanceof Error ? e.message : "Failed to load job"),
     );
   }, [selectedId, nav, loadDetail]);
+
+  useEffect(() => {
+    if (!selectedId || nav !== "jobs") return;
+    const reviewActive =
+      detail?.reviewStatus === "queued" || detail?.reviewStatus === "running";
+    if (!reviewActive) return;
+    const timer = setInterval(() => {
+      loadDetail(selectedId).catch(() => undefined);
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [selectedId, nav, detail?.reviewStatus, loadDetail]);
 
   useEffect(() => {
     if (!queueJobs.length && !(detail && isProcessing(detail.status))) return;
@@ -1174,6 +1229,7 @@ export default function Home() {
                 error={error}
                 onBack={() => setSelectedId(null)}
                 onRetry={() => retryJob(detail.id)}
+                onRefresh={() => loadDetail(detail.id)}
               />
             ) : (
               <p className="text-[var(--ink-soft)]">Loading job…</p>
@@ -1255,18 +1311,204 @@ function JobBudgetBar({
   );
 }
 
+function FinalReviewPanel({
+  jobId,
+  status,
+  sceneCount,
+  reviewStatus,
+  review,
+  aiBatch,
+  onRefresh,
+}: {
+  jobId: string;
+  status: string;
+  sceneCount: number;
+  reviewStatus?: string | null;
+  review?: FinalReviewPayload | null;
+  aiBatch?: boolean;
+  onRefresh: () => void;
+}) {
+  const [starting, setStarting] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const canRun =
+    status === "completed" && sceneCount > 0 && reviewStatus !== "queued" && reviewStatus !== "running";
+
+  async function startReview() {
+    setStarting(true);
+    setLocalError(null);
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/review`, { method: "POST" });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error || "Failed to start review");
+      onRefresh();
+    } catch (e) {
+      setLocalError(e instanceof Error ? e.message : "Review failed");
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  const running = reviewStatus === "queued" || reviewStatus === "running";
+  const done = reviewStatus === "completed" && review?.version;
+  const majorOnly = (review?.majorIssues || []).filter((i) => i.severity === "major");
+  const est = review?.repairEstimate;
+
+  return (
+    <div className="mt-6 rounded-2xl border border-[var(--line)] bg-[var(--panel)] px-5 py-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-semibold tracking-[0.18em] text-[var(--blue-bright)] uppercase">
+            Final review
+          </p>
+          <p className="mt-2 text-sm text-[var(--ink-soft)]">
+            Scan every scene still against its narration words and the film topic.
+            Estimates Google queries and AI generations to fix major issues.
+          </p>
+        </div>
+        {canRun ? (
+          <button
+            type="button"
+            onClick={() => void startReview()}
+            disabled={starting}
+            className="rounded-lg bg-[var(--blue)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--blue-deep)] disabled:opacity-50"
+          >
+            {starting ? "Starting…" : "Run final review"}
+          </button>
+        ) : null}
+      </div>
+
+      {localError ? (
+        <p className="mt-3 text-sm text-[var(--danger)]">{localError}</p>
+      ) : null}
+
+      {running ? (
+        <p className="mt-4 text-sm text-white/90">
+          {(review as FinalReviewPayload)?.progress || "Review running…"}
+        </p>
+      ) : null}
+
+      {reviewStatus === "failed" && review?.error ? (
+        <p className="mt-4 text-sm text-[var(--danger)]">{review.error}</p>
+      ) : null}
+
+      {done ? (
+        <div className="mt-5 space-y-5">
+          <p className="text-sm leading-relaxed text-white/90">{review.topicSummary}</p>
+
+          <div className="flex flex-wrap gap-4 text-sm">
+            <span className="text-white">
+              <strong>{review.majorCount ?? 0}</strong> major
+            </span>
+            <span className="text-[var(--ink-soft)]">
+              <strong className="text-white">{review.minorCount ?? 0}</strong> minor
+            </span>
+            <span className="text-[var(--ink-soft)]">
+              <strong className="text-white">{review.ok ?? 0}</strong> ok
+            </span>
+            <span className="text-[var(--ink-soft)]">
+              scan {formatUsd(review.scanCostUsd ?? 0)}
+            </span>
+          </div>
+
+          {est ? (
+            <div className="rounded-xl border border-[rgba(96,165,250,0.28)] bg-[rgba(59,130,246,0.08)] px-4 py-4">
+              <p className="text-xs font-semibold tracking-[0.16em] text-[var(--blue-bright)] uppercase">
+                Repair estimate
+              </p>
+              <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                <p className="text-white">
+                  Google queries:{" "}
+                  <strong>{est.googleQueries}</strong>
+                  <span className="text-[var(--ink-soft)]">
+                    {" "}
+                    (~{formatUsd(est.searchApiUsd)} SearchAPI)
+                  </span>
+                </p>
+                <p className="text-white">
+                  AI generations:{" "}
+                  <strong>{est.aiGenerations}</strong>
+                  <span className="text-[var(--ink-soft)]">
+                    {" "}
+                    (
+                    {aiBatch
+                      ? `batch ${formatUsd(est.aiBatchUsd)}`
+                      : `realtime ${formatUsd(est.aiRealtimeUsd)}`}
+                    )
+                  </span>
+                </p>
+                {est.googleRepicks > 0 ? (
+                  <p className="text-[var(--ink-soft)] sm:col-span-2">
+                    + {est.googleRepicks} scenes can repick from existing search (0 new queries)
+                  </p>
+                ) : null}
+                <p className="font-semibold text-white sm:col-span-2">
+                  Total repair est.{" "}
+                  {formatUsd(
+                    aiBatch
+                      ? est.searchApiUsd + est.aiBatchUsd
+                      : est.totalRepairUsd,
+                  )}
+                </p>
+              </div>
+            </div>
+          ) : null}
+
+          {majorOnly.length > 0 ? (
+            <div>
+              <p className="text-xs font-semibold tracking-[0.16em] text-[var(--danger)] uppercase">
+                Major issues ({majorOnly.length})
+              </p>
+              <ul className="mt-3 max-h-80 space-y-2 overflow-y-auto text-sm">
+                {majorOnly.map((issue) => (
+                  <li
+                    key={`${issue.index}-${issue.category}`}
+                    className="rounded-lg border border-[var(--line)] bg-[var(--panel-2)] px-3 py-2"
+                  >
+                    <span className="font-semibold text-white">
+                      Scene {issue.index}
+                    </span>
+                    {issue.startSec != null ? (
+                      <span className="text-[var(--ink-soft)]">
+                        {" "}
+                        · {issue.startSec.toFixed(1)}s
+                      </span>
+                    ) : null}
+                    <span className="text-[var(--ink-soft)]"> · {issue.fixType}</span>
+                    <p className="mt-1 text-white/90">{issue.issue}</p>
+                    <p className="mt-1 truncate text-[var(--ink-soft)]">{issue.words}</p>
+                    {issue.suggestedQuery ? (
+                      <p className="mt-1 font-mono text-xs text-[var(--blue-bright)]">
+                        → {issue.suggestedQuery}
+                      </p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="text-sm text-[var(--ink-soft)]">No major issues found.</p>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function JobDetailView({
   detail,
   scenes,
   error,
   onBack,
   onRetry,
+  onRefresh,
 }: {
   detail: JobDetail;
   scenes: Scene[];
   error: string | null;
   onBack: () => void;
   onRetry: () => void;
+  onRefresh: () => void;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -1358,6 +1600,9 @@ function JobDetailView({
             {nicheLabel(detail.niche)}
             {detail.wpm ? ` · ${detail.wpm} WPM` : ""}
             {detail.model ? ` · ${detail.model}` : ""}
+            {scenes.filter((s) => s.videoUrl).length
+              ? ` · ${scenes.filter((s) => s.videoUrl).length} Pexels clips`
+              : ""}
           </p>
         </div>
         {detail.status === "failed" ? (
@@ -1380,6 +1625,16 @@ function JobDetailView({
         <p className="mt-4 text-sm font-medium text-[var(--danger)]">{error}</p>
       ) : null}
 
+      <FinalReviewPanel
+        jobId={detail.id}
+        status={detail.status}
+        sceneCount={detail.sceneCount || scenes.length}
+        reviewStatus={detail.reviewStatus}
+        review={detail.review}
+        aiBatch={detail.aiBatch}
+        onRefresh={onRefresh}
+      />
+
       <div className="mt-8">
         <h3 className="font-[family-name:var(--font-fraunces)] text-2xl text-white">
           Scenes
@@ -1387,6 +1642,9 @@ function JobDetailView({
         <p className="mt-2 text-sm text-[var(--ink-soft)]">
           Images stay minimized. Click a scene to maximize it — only one open at
           a time.
+          {scenes.some((s) => s.videoUrl)
+            ? " Scenes with a Pexels badge have a B-roll clip."
+            : ""}
         </p>
 
         {scenes.length === 0 ? (
@@ -1398,6 +1656,7 @@ function JobDetailView({
               const words = sceneWordsOf(scene);
               const open = expandedId === scene.id;
               const thumb = scene.thumbnailUrl || scene.imageUrl;
+              const hasVideo = Boolean(scene.videoUrl?.trim());
 
               return (
                 <article
@@ -1438,6 +1697,11 @@ function JobDetailView({
                         <span className="rounded-full bg-white/5 px-2 py-0.5 text-[11px] uppercase text-[var(--ink-soft)]">
                           {scene.visualSource}
                         </span>
+                        {hasVideo ? (
+                          <span className="rounded-full border border-[rgba(251,191,36,0.4)] bg-[rgba(251,191,36,0.12)] px-2 py-0.5 text-[11px] font-semibold uppercase text-amber-200">
+                            Pexels
+                          </span>
+                        ) : null}
                         {typeof scene.durationSec === "number" ? (
                           <span className="text-[11px] text-[var(--ink-soft)]">
                             {scene.durationSec.toFixed(1)}s
@@ -1501,7 +1765,22 @@ function JobDetailView({
                         ) : null}
                       </div>
 
-                      <div className="min-w-0 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-3 sm:p-4">
+                      <div className="min-w-0 space-y-3 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-3 sm:p-4">
+                        {hasVideo ? (
+                          <div className="overflow-hidden rounded-lg border border-[rgba(251,191,36,0.35)] bg-black/30">
+                            <video
+                              src={scene.videoUrl || undefined}
+                              controls
+                              playsInline
+                              preload="metadata"
+                              className="aspect-video w-full bg-black object-cover"
+                            />
+                            <p className="border-t border-[var(--line)] px-3 py-2 text-[11px] font-semibold tracking-wide text-amber-200 uppercase">
+                              Pexels B-roll
+                              {scene.videoQuery ? ` · ${scene.videoQuery}` : ""}
+                            </p>
+                          </div>
+                        ) : null}
                         {thumb ? (
                           <div className="overflow-hidden rounded-lg border border-[var(--line)] bg-black/30">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1511,15 +1790,20 @@ function JobDetailView({
                               className="aspect-video w-full object-cover"
                             />
                           </div>
-                        ) : (
+                        ) : !hasVideo ? (
                           <div className="flex aspect-video items-center justify-center rounded-lg border border-dashed border-[var(--line)] bg-black/20 text-sm text-[var(--ink-soft)]">
                             {scene.visualSource === "ai"
                               ? "AI still — no Google image"
                               : "No image preview"}
                           </div>
-                        )}
+                        ) : null}
 
                         <div className="mt-4 space-y-3">
+                          {hasVideo ? (
+                            <Field label="Pexels video URL">
+                              <UrlOrEmpty value={scene.videoUrl} />
+                            </Field>
+                          ) : null}
                           <Field label="Image URL">
                             <UrlOrEmpty value={scene.imageUrl} />
                           </Field>
