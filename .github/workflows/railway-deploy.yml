@@ -1,8 +1,8 @@
 name: Deploy to Railway
 
+# Manual only — requires RAILWAY_TOKEN in GitHub repo secrets.
+# Do not run on push: a failed deploy job can skip Railway autodeploy when Wait for CI is on.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 jobs:
