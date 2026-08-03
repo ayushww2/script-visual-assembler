@@ -211,16 +211,27 @@ export async function runScriptDivider(input: {
   const named = forceNamedEntitiesToGoogle(beats, merged);
   // Photographable places/objects (tombs, sites, etc.) → Google-first, not AI
   const enforced = forceGoogleFirstSubjects(beats, named);
-  // ≤125 Google queries · ≤100 AI · pack ~2 beats/query on large films
-  let budgeted = applyVisualBudget(beats, enforced);
+
+  // Celebrity wants denser unique stills (≥300 on long films) — allow more
+  // Google queries and pack less aggressively. Mystery keeps default caps.
+  const budgetOpts =
+    niche.id === "celebrity" || phase === "google-only"
+      ? { maxGoogle: 180, maxAi: 0, perQuery: 2 }
+      : undefined;
+
+  let budgeted = applyVisualBudget(beats, enforced, budgetOpts);
 
   // Celebrity / google-only: strip every AI assignment → Google packs
   if (phase === "google-only") {
     budgeted = forceAllBeatsToGoogle(beats, budgeted);
-    budgeted = applyVisualBudget(beats, {
-      googleSearches: budgeted.googleSearches,
-      aiGenerate: [],
-    });
+    budgeted = applyVisualBudget(
+      beats,
+      {
+        googleSearches: budgeted.googleSearches,
+        aiGenerate: [],
+      },
+      budgetOpts,
+    );
     budgeted = forceAllBeatsToGoogle(beats, budgeted);
   }
 

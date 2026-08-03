@@ -107,14 +107,17 @@ function splitScriptText(script: string): Beat[] {
 }
 
 /**
- * Celebrity experiment: sentence-boundary scenes sized from WPM.
- * Target calm 4–7 seconds; never slice a sentence in the middle.
+ * Celebrity experiment: calm ~4–6s scenes from the script at niche WPM.
+ * Prefer whole sentences; only split long lines at natural clause pauses
+ * (comma / dash / semicolon) so a ~31 min / 130 WPM film lands ≥300 stills.
+ * Never slice mid-phrase.
  */
 function splitScriptTextCelebrity(script: string, wpm: number): Beat[] {
   const wps = Math.max(1, wpm) / 60;
+  // Prefer denser stills: ~4–6s (≈9–13 words @ 130 WPM).
   const minWords = Math.max(4, Math.ceil(4 * wps));
-  const maxWords = Math.max(minWords + 1, Math.floor(7 * wps));
-  const targetWords = Math.round((minWords + maxWords) / 2);
+  const maxWords = Math.max(minWords + 1, Math.floor(6.25 * wps));
+  const targetWords = Math.max(minWords, Math.round(5.25 * wps));
 
   const normalized = script.replace(/\r\n/g, "\n").trim();
   const paragraphs = normalized
@@ -122,9 +125,11 @@ function splitScriptTextCelebrity(script: string, wpm: number): Beat[] {
     .map((p) => p.replace(/\s+/g, " ").trim())
     .filter(Boolean);
 
-  const sentences: string[] = [];
+  const clauses: string[] = [];
   for (const p of paragraphs) {
-    sentences.push(...splitSentences(p));
+    for (const sentence of splitSentences(p)) {
+      clauses.push(...splitLongSentenceIntoClauses(sentence, minWords, maxWords));
+    }
   }
 
   const units: string[] = [];
@@ -138,46 +143,99 @@ function splitScriptTextCelebrity(script: string, wpm: number): Beat[] {
     bufWords = 0;
   };
 
-  // Soft ceiling (~10s) for absorbing a trailing short line so we don't
-  // leave punchy fragments as their own scene.
-  const hardMaxWords = Math.max(maxWords + 1, Math.floor(10 * wps));
+  // Only absorb tiny leftovers into neighbors (keep denser scene count).
+  const hardMaxWords = Math.max(maxWords + 2, Math.floor(8 * wps));
 
-  for (const sentence of sentences) {
-    const wc = wordCount(sentence);
+  for (const clause of clauses) {
+    const wc = wordCount(clause);
     if (!wc) continue;
 
-    // Oversized sentence stays intact as its own scene.
     if (wc > maxWords && bufWords === 0) {
-      units.push(sentence);
+      units.push(clause);
       continue;
     }
 
     if (bufWords > 0 && bufWords + wc > maxWords) {
-      // Prefer absorbing into the next sentence when the buffer is still short.
       if (!(bufWords < minWords && bufWords + wc <= hardMaxWords)) {
         flush();
       }
     }
 
-    buf.push(sentence);
+    buf.push(clause);
     bufWords += wc;
 
-    // Flush when we reach a calm target, or a question that already feels complete.
+    // Flush early once we hit a calm beat — denser stills for long films.
     if (
       bufWords >= targetWords ||
-      (bufWords >= minWords && /[?]$/.test(sentence.trim()))
+      (bufWords >= minWords && /[?]$/.test(clause.trim()))
     ) {
       flush();
     }
   }
   flush();
 
-  const paced = rebalanceCelebrityUnits(units, minWords, hardMaxWords);
+  // Only glue truly tiny fragments (< ~3s), not calm short lines.
+  const tinyWords = Math.max(3, Math.floor(3 * wps));
+  // Allow a bit more room when absorbing 1–3 word punch leftovers.
+  const paced = rebalanceCelebrityUnits(
+    units,
+    tinyWords,
+    Math.max(hardMaxWords, Math.floor(11 * wps)),
+  );
 
   return paced.map((text, i) => ({
     id: `b${i + 1}`,
     text,
   }));
+}
+
+/**
+ * Split an oversized sentence at natural pauses so visuals can change
+ * without cutting mid-phrase (e.g. "...troubling people," / "even after...").
+ */
+function splitLongSentenceIntoClauses(
+  sentence: string,
+  minWords: number,
+  maxWords: number,
+): string[] {
+  const wc = wordCount(sentence);
+  if (wc <= maxWords) return [sentence];
+
+  // Prefer stronger pauses first.
+  const parts = sentence
+    .split(/(?<=[,;:—–])\s+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length < 2) return [sentence];
+
+  const out: string[] = [];
+  let buf: string[] = [];
+  let bufWords = 0;
+  const flush = () => {
+    if (!buf.length) return;
+    out.push(buf.join(" "));
+    buf = [];
+    bufWords = 0;
+  };
+
+  for (const part of parts) {
+    const pw = wordCount(part);
+    if (bufWords > 0 && bufWords + pw > maxWords && bufWords >= minWords) {
+      flush();
+    }
+    buf.push(part);
+    bufWords += pw;
+    if (bufWords >= maxWords) flush();
+  }
+  flush();
+
+  // If a trailing fragment is tiny, glue it back onto the previous clause.
+  if (out.length >= 2 && wordCount(out[out.length - 1]) < minWords) {
+    const tail = out.pop()!;
+    out[out.length - 1] = `${out[out.length - 1]} ${tail}`;
+  }
+
+  return out.length ? out : [sentence];
 }
 
 /** Merge leftover short celebrity units into neighbors (never split). */
