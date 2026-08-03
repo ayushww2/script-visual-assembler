@@ -16,6 +16,7 @@ import {
   GPT_IMAGE2_REALTIME_USD,
   type JobCostEstimate,
 } from "@/lib/jobs/costEstimate";
+import { runClientSceneScan } from "@/lib/jobs/clientScan";
 
 type NavKey = "new" | "jobs" | "queue";
 
@@ -1225,6 +1226,7 @@ export default function Home() {
                                         status={job.status}
                                         sceneCount={job.sceneCount}
                                         reviewStatus={job.reviewStatus}
+                                        title={job.title}
                                         compact
                                         onRefresh={() => {
                                           void loadJobs();
@@ -1232,6 +1234,7 @@ export default function Home() {
                                             void loadDetail(job.id);
                                           }
                                         }}
+                                        onOpenAfterScan={() => openJob(job.id)}
                                       />
                                       <button
                                         type="button"
@@ -1341,6 +1344,27 @@ function JobBudgetBar({
   );
 }
 
+function clientScanStorageKey(jobId: string) {
+  return `job-scan-${jobId}`;
+}
+
+function loadClientScan(jobId: string): FinalReviewPayload | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(clientScanStorageKey(jobId));
+    return raw ? (JSON.parse(raw) as FinalReviewPayload) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveClientScan(jobId: string, review: FinalReviewPayload) {
+  sessionStorage.setItem(
+    clientScanStorageKey(jobId),
+    JSON.stringify(review),
+  );
+}
+
 function canScanJob(input: {
   status: string;
   sceneCount: number;
@@ -1368,7 +1392,13 @@ function ScanReviewButton({
   reviewStatus,
   hasResult,
   scenesLength,
+  title,
+  scenes,
   onRefresh,
+  onClientReview,
+  onClientScanStart,
+  onClientScanProgress,
+  onOpenAfterScan,
   compact,
 }: {
   jobId: string;
@@ -1377,15 +1407,26 @@ function ScanReviewButton({
   reviewStatus?: string | null;
   hasResult?: boolean;
   scenesLength?: number;
+  title?: string | null;
+  scenes?: Scene[];
   onRefresh: () => void;
+  onClientReview?: (review: FinalReviewPayload) => void;
+  onClientScanStart?: () => void;
+  onClientScanProgress?: (message: string) => void;
+  onOpenAfterScan?: () => void;
   /** Smaller variant for job list rows */
   compact?: boolean;
 }) {
   const [starting, setStarting] = useState(false);
+  const [clientScanning, setClientScanning] = useState(false);
+  const [clientProgress, setClientProgress] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
 
   const enabled = canScanJob({ status, sceneCount, reviewStatus, scenesLength });
-  const running = reviewStatus === "queued" || reviewStatus === "running";
+  const running =
+    reviewStatus === "queued" ||
+    reviewStatus === "running" ||
+    clientScanning;
 
   async function startReview(e?: { stopPropagation(): void; preventDefault(): void }) {
     e?.stopPropagation();
@@ -1394,17 +1435,73 @@ function ScanReviewButton({
     setLocalError(null);
     try {
       const res = await fetch(`/api/jobs/${jobId}/review`, { method: "POST" });
-      const json = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(json.error || "Failed to start scan");
+      if (res.ok) {
+        onRefresh();
+        return;
+      }
+
+      if (res.status !== 404) {
+        const json = (await res.json()) as { error?: string };
+        throw new Error(json.error || "Failed to start scan");
+      }
+
+      setClientScanning(true);
+      onClientScanStart?.();
+      setClientProgress("Loading scenes…");
+      onClientScanProgress?.("Loading scenes…");
+
+      let scanScenes = scenes;
+      let topic = title || "";
+      if (!scanScenes?.length) {
+        const detailRes = await fetch(`/api/jobs/${jobId}`);
+        const detailJson = (await detailRes.json()) as {
+          error?: string;
+          job?: { title?: string | null; scenes?: Scene[] | null };
+        };
+        if (!detailRes.ok) {
+          throw new Error(detailJson.error || "Failed to load job");
+        }
+        scanScenes = detailJson.job?.scenes || [];
+        topic = detailJson.job?.title || topic;
+      }
+
+      if (!scanScenes.length) {
+        throw new Error("No scenes to scan");
+      }
+
+      const result = await runClientSceneScan({
+        jobId,
+        topic,
+        scenes: scanScenes,
+        onProgress: (message) => {
+          setClientProgress(message);
+          onClientScanProgress?.(message);
+        },
+      });
+
+      saveClientScan(jobId, result as FinalReviewPayload);
+      onClientReview?.(result as FinalReviewPayload);
+      onOpenAfterScan?.();
       onRefresh();
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : "Scan failed");
     } finally {
       setStarting(false);
+      setClientScanning(false);
+      setClientProgress(null);
     }
   }
 
   if (!enabled && !running) return null;
+
+  const buttonLabel = clientScanning
+    ? clientProgress || "Scanning…"
+    : starting
+      ? "Starting…"
+      : scanReviewLabel(
+          reviewStatus,
+          hasResult || Boolean(loadClientScan(jobId)),
+        );
 
   return (
     <span
@@ -1416,16 +1513,18 @@ function ScanReviewButton({
         type="button"
         onClick={(e) => void startReview(e)}
         disabled={starting || running}
-        title="Scan all scene stills vs narration and topic"
+        title={
+          clientScanning
+            ? clientProgress || "Scanning scenes…"
+            : "Scan all scene stills vs narration and topic"
+        }
         className={
           compact
             ? "shrink-0 rounded-lg border border-[rgba(96,165,250,0.45)] bg-[rgba(59,130,246,0.14)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--blue-bright)] hover:bg-[rgba(59,130,246,0.28)] disabled:opacity-50"
             : "rounded-lg bg-[var(--blue)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--blue-deep)] disabled:opacity-50"
         }
       >
-        {starting
-          ? "Starting…"
-          : scanReviewLabel(reviewStatus, hasResult)}
+        {buttonLabel}
       </button>
       {localError && !compact ? (
         <span className="max-w-[220px] text-right text-xs text-[var(--danger)]">
@@ -1439,16 +1538,29 @@ function ScanReviewButton({
 function FinalReviewPanel({
   reviewStatus,
   review,
+  clientReview,
+  clientScanning,
+  clientProgress,
   aiBatch,
 }: {
   reviewStatus?: string | null;
   review?: FinalReviewPayload | null;
+  clientReview?: FinalReviewPayload | null;
+  clientScanning?: boolean;
+  clientProgress?: string | null;
   aiBatch?: boolean;
 }) {
-  const running = reviewStatus === "queued" || reviewStatus === "running";
-  const done = reviewStatus === "completed" && review?.version;
-  const majorOnly = (review?.majorIssues || []).filter((i) => i.severity === "major");
-  const est = review?.repairEstimate;
+  const running =
+    reviewStatus === "queued" ||
+    reviewStatus === "running" ||
+    Boolean(clientScanning);
+  const effectiveReview =
+    reviewStatus === "completed" && review?.version ? review : clientReview;
+  const done = Boolean(effectiveReview?.version) && !clientScanning;
+  const majorOnly = (effectiveReview?.majorIssues || []).filter(
+    (i) => i.severity === "major",
+  );
+  const est = effectiveReview?.repairEstimate;
 
   if (!running && !done && reviewStatus !== "failed") return null;
 
@@ -1460,7 +1572,9 @@ function FinalReviewPanel({
 
       {running ? (
         <p className="mt-4 text-sm text-white/90">
-          {(review as FinalReviewPayload)?.progress || "Review running…"}
+          {(review as FinalReviewPayload)?.progress ||
+            clientProgress ||
+            "Review running…"}
         </p>
       ) : null}
 
@@ -1470,20 +1584,23 @@ function FinalReviewPanel({
 
       {done ? (
         <div className="mt-5 space-y-5">
-          <p className="text-sm leading-relaxed text-white/90">{review.topicSummary}</p>
+          <p className="text-sm leading-relaxed text-white/90">
+            {effectiveReview?.topicSummary}
+          </p>
 
           <div className="flex flex-wrap gap-4 text-sm">
             <span className="text-white">
-              <strong>{review.majorCount ?? 0}</strong> major
+              <strong>{effectiveReview?.majorCount ?? 0}</strong> major
             </span>
             <span className="text-[var(--ink-soft)]">
-              <strong className="text-white">{review.minorCount ?? 0}</strong> minor
+              <strong className="text-white">{effectiveReview?.minorCount ?? 0}</strong>{" "}
+              minor
             </span>
             <span className="text-[var(--ink-soft)]">
-              <strong className="text-white">{review.ok ?? 0}</strong> ok
+              <strong className="text-white">{effectiveReview?.ok ?? 0}</strong> ok
             </span>
             <span className="text-[var(--ink-soft)]">
-              scan {formatUsd(review.scanCostUsd ?? 0)}
+              scan {formatUsd(effectiveReview?.scanCostUsd ?? 0)}
             </span>
           </div>
 
@@ -1587,6 +1704,15 @@ function JobDetailView({
   onRefresh: () => void;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [clientReview, setClientReview] = useState<FinalReviewPayload | null>(
+    null,
+  );
+  const [clientScanning, setClientScanning] = useState(false);
+  const [clientProgress, setClientProgress] = useState<string | null>(null);
+
+  useEffect(() => {
+    setClientReview(loadClientScan(detail.id));
+  }, [detail.id]);
 
   function toggleScene(id: string) {
     setExpandedId((current) => (current === id ? null : id));
@@ -1688,8 +1814,20 @@ function JobDetailView({
             sceneCount={detail.sceneCount || scenes.length}
             scenesLength={scenes.length}
             reviewStatus={detail.reviewStatus}
-            hasResult={Boolean(detail.review?.version)}
+            hasResult={Boolean(detail.review?.version || clientReview?.version)}
+            title={detail.title}
+            scenes={scenes}
             onRefresh={onRefresh}
+            onClientReview={(review) => {
+              setClientReview(review);
+              setClientScanning(false);
+              setClientProgress(null);
+            }}
+            onClientScanStart={() => {
+              setClientScanning(true);
+              setClientProgress("Starting scan…");
+            }}
+            onClientScanProgress={setClientProgress}
           />
           {detail.status === "failed" ? (
             <button
@@ -1715,6 +1853,9 @@ function JobDetailView({
       <FinalReviewPanel
         reviewStatus={detail.reviewStatus}
         review={detail.review}
+        clientReview={clientReview}
+        clientScanning={clientScanning}
+        clientProgress={clientProgress}
         aiBatch={detail.aiBatch}
       />
 
