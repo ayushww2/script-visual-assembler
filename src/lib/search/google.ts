@@ -336,7 +336,10 @@ function sceneHasPeopleInPlace(scene: {
   subject?: string | null;
   words?: string | null;
 }): boolean {
-  const blob = `${scene.sourceUrl || ""} ${scene.imageUrl || ""} ${scene.why || ""} ${scene.query || ""} ${scene.subject || ""} ${scene.words || ""}`.toLowerCase();
+  // Only inspect the image/source metadata — never the narration words.
+  // Scripts often say "resort" / "hotel" for places like Cal Neva without
+  // meaning the still is wedding/tourist people stock.
+  const blob = `${scene.sourceUrl || ""} ${scene.imageUrl || ""} ${scene.why || ""} ${scene.query || ""} ${scene.subject || ""}`.toLowerCase();
   return PEOPLE_IN_PLACE_HINTS.some((h) => blob.includes(h));
 }
 
