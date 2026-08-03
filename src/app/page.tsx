@@ -1182,20 +1182,20 @@ export default function Home() {
                                         }
                                       />
                                     </label>
-                                    <button
-                                      type="button"
-                                      onClick={() => openJob(job.id)}
-                                      className="click-row flex min-w-0 flex-1 flex-col gap-2 text-left"
-                                    >
-                                      <JobBudgetBar
-                                        googleCount={job.googleCount}
-                                        aiCount={job.aiCount}
-                                        sceneCount={job.sceneCount}
-                                        aiBatch={job.aiBatch}
-                                        phase={job.phase}
-                                      />
-                                      <div className="flex w-full items-center gap-4">
-                                        <div className="min-w-0 flex-1">
+                                    <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+                                      <button
+                                        type="button"
+                                        onClick={() => openJob(job.id)}
+                                        className="click-row flex min-w-0 flex-1 flex-col gap-2 text-left"
+                                      >
+                                        <JobBudgetBar
+                                          googleCount={job.googleCount}
+                                          aiCount={job.aiCount}
+                                          sceneCount={job.sceneCount}
+                                          aiBatch={job.aiBatch}
+                                          phase={job.phase}
+                                        />
+                                        <div className="min-w-0">
                                           <p className="truncate text-base font-semibold text-white">
                                             {job.title || "Untitled"}
                                           </p>
@@ -1210,33 +1210,37 @@ export default function Home() {
                                                   : ""}
                                           </p>
                                         </div>
-                                        <span
-                                          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide uppercase ${
-                                            job.status === "failed"
-                                              ? "bg-[rgba(248,113,113,0.12)] text-[var(--danger)]"
-                                              : "bg-[rgba(52,211,153,0.12)] text-[var(--ok)]"
-                                          }`}
-                                        >
-                                          {statusLabel(job.status)}
-                                        </span>
-                                        <ScanReviewButton
-                                          jobId={job.id}
-                                          status={job.status}
-                                          sceneCount={job.sceneCount}
-                                          reviewStatus={job.reviewStatus}
-                                          compact
-                                          onRefresh={() => {
-                                            void loadJobs();
-                                            if (selectedId === job.id) {
-                                              void loadDetail(job.id);
-                                            }
-                                          }}
-                                        />
-                                        <span className="chevron shrink-0 text-sm font-semibold text-[var(--ink-soft)]">
-                                          Open →
-                                        </span>
-                                      </div>
-                                    </button>
+                                      </button>
+                                      <span
+                                        className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide uppercase ${
+                                          job.status === "failed"
+                                            ? "bg-[rgba(248,113,113,0.12)] text-[var(--danger)]"
+                                            : "bg-[rgba(52,211,153,0.12)] text-[var(--ok)]"
+                                        }`}
+                                      >
+                                        {statusLabel(job.status)}
+                                      </span>
+                                      <ScanReviewButton
+                                        jobId={job.id}
+                                        status={job.status}
+                                        sceneCount={job.sceneCount}
+                                        reviewStatus={job.reviewStatus}
+                                        compact
+                                        onRefresh={() => {
+                                          void loadJobs();
+                                          if (selectedId === job.id) {
+                                            void loadDetail(job.id);
+                                          }
+                                        }}
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => openJob(job.id)}
+                                        className="chevron shrink-0 px-1 text-sm font-semibold text-[var(--ink-soft)] hover:text-white"
+                                      >
+                                        Open →
+                                      </button>
+                                    </div>
                                   </div>
                                 );
                               })}
@@ -1403,7 +1407,11 @@ function ScanReviewButton({
   if (!enabled && !running) return null;
 
   return (
-    <span className="inline-flex flex-col items-end gap-1">
+    <span
+      className="inline-flex shrink-0 flex-col items-end gap-1"
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
       <button
         type="button"
         onClick={(e) => void startReview(e)}

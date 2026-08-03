@@ -46,5 +46,8 @@ export async function GET() {
       softLimit: DAILY_QUERY_SOFT_LIMIT,
       remaining: Math.max(0, DAILY_QUERY_SOFT_LIMIT - usedToday),
     },
+    features: {
+      reviewScan: 2,
+    },
   });
 }
