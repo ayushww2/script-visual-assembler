@@ -36,14 +36,6 @@ const NICHES: NicheOption[] = [
     description:
       "Clean documentary evidence — maps, artifacts, archives, places, soft investigative tone. VO locked at 160 WPM.",
   },
-  {
-    id: "celebrity",
-    label: "Celebrity",
-    version: "v1-exp",
-    wpm: 130,
-    description:
-      "EXPERIMENT — Google Images only at 130 WPM. Entity-locked people/places. Calm ~4–7s scenes from the script. Mystery unchanged.",
-  },
 ];
 
 type JobListItem = {
@@ -65,6 +57,7 @@ type JobListItem = {
   voiceoverDurationSec?: number | null;
   aiBatch?: boolean;
   aiBatchId?: string | null;
+  reviewStatus?: string | null;
   createdAt: string;
   completedAt?: string | null;
 };
@@ -286,25 +279,21 @@ export default function Home() {
   );
 
   const submitEstimates = useMemo(() => {
-    const mode = forceAllAi
-      ? "ai-only"
-      : niche === "celebrity"
-        ? "google-only"
-        : "google-first";
+    const mode = forceAllAi ? "ai-only" : "google-first";
     if (batchFiles.length > 0) {
       return batchFiles.map((f) => ({
         title: f.title,
-        estimate: estimateJobCosts({ script: f.script, mode, nicheId: niche }),
+        estimate: estimateJobCosts({ script: f.script, mode }),
       }));
     }
     if (!script.trim()) return [] as Array<{ title: string; estimate: JobCostEstimate }>;
     return [
       {
         title: title.trim() || "Untitled",
-        estimate: estimateJobCosts({ script, mode, nicheId: niche }),
+        estimate: estimateJobCosts({ script, mode }),
       },
     ];
-  }, [batchFiles, script, title, forceAllAi, niche]);
+  }, [batchFiles, script, title, forceAllAi]);
 
   const submitTotals = useMemo(() => {
     const scenes = submitEstimates.reduce((n, e) => n + e.estimate.scenes, 0);
@@ -381,9 +370,21 @@ export default function Home() {
     if (!reviewActive) return;
     const timer = setInterval(() => {
       loadDetail(selectedId).catch(() => undefined);
+      loadJobs().catch(() => undefined);
     }, 2500);
     return () => clearInterval(timer);
-  }, [selectedId, nav, detail?.reviewStatus, loadDetail]);
+  }, [selectedId, nav, detail?.reviewStatus, loadDetail, loadJobs]);
+
+  useEffect(() => {
+    const anyReviewActive = jobs.some(
+      (j) => j.reviewStatus === "queued" || j.reviewStatus === "running",
+    );
+    if (!anyReviewActive) return;
+    const timer = setInterval(() => {
+      loadJobs().catch(() => undefined);
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [jobs, loadJobs]);
 
   useEffect(() => {
     if (!queueJobs.length && !(detail && isProcessing(detail.status))) return;
@@ -514,13 +515,9 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             niche,
-            phase: forceAllAi
-              ? "ai-only"
-              : niche === "celebrity"
-                ? "google-only"
-                : "google-first",
-            forceAllAi: niche === "celebrity" ? false : forceAllAi,
-            aiBatch: niche === "celebrity" ? false : aiBatch,
+            phase: forceAllAi ? "ai-only" : "google-first",
+            forceAllAi,
+            aiBatch,
             jobs: batchFiles.map((f) => ({
               script: f.script,
               title: f.title,
@@ -564,13 +561,9 @@ export default function Home() {
           script,
           title: title.trim() || undefined,
           niche,
-          phase: forceAllAi
-            ? "ai-only"
-            : niche === "celebrity"
-              ? "google-only"
-              : "google-first",
-          forceAllAi: niche === "celebrity" ? false : forceAllAi,
-          aiBatch: niche === "celebrity" ? false : aiBatch,
+          phase: forceAllAi ? "ai-only" : "google-first",
+          forceAllAi,
+          aiBatch,
         }),
       });
       const json = (await res.json()) as {
@@ -880,25 +873,10 @@ export default function Home() {
 
               <Panel title="Visual mode & AI pricing">
                 <div className="space-y-3">
-                  {niche === "celebrity" ? (
-                    <div className="rounded-xl border border-[rgba(251,191,36,0.35)] bg-[rgba(251,191,36,0.1)] px-4 py-4 text-sm leading-relaxed text-amber-100">
-                      Celebrity experiment: <strong>Google Images only</strong> at
-                      130 WPM. Entity-locked people/places. Calm ~4–7s scenes from
-                      the script (no mid-sentence cuts). No AI stills. Mystery
-                      niche is unchanged.
-                    </div>
-                  ) : null}
-                  <label
-                    className={`flex items-start gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-4 py-4 ${
-                      niche === "celebrity"
-                        ? "cursor-not-allowed opacity-45"
-                        : "cursor-pointer"
-                    }`}
-                  >
+                  <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-4 py-4">
                     <input
                       type="checkbox"
-                      checked={niche === "celebrity" ? false : forceAllAi}
-                      disabled={niche === "celebrity"}
+                      checked={forceAllAi}
                       onChange={(e) => setForceAllAi(e.target.checked)}
                       className="mt-1 h-4 w-4 accent-[var(--blue)]"
                     />
@@ -914,17 +892,10 @@ export default function Home() {
                     </span>
                   </label>
 
-                  <label
-                    className={`flex items-start gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-4 py-4 ${
-                      niche === "celebrity"
-                        ? "cursor-not-allowed opacity-45"
-                        : "cursor-pointer"
-                    }`}
-                  >
+                  <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] px-4 py-4">
                     <input
                       type="checkbox"
-                      checked={niche === "celebrity" ? false : aiBatch}
-                      disabled={niche === "celebrity"}
+                      checked={aiBatch}
                       onChange={(e) => setAiBatch(e.target.checked)}
                       className="mt-1 h-4 w-4 accent-[var(--blue)]"
                     />
@@ -1248,6 +1219,19 @@ export default function Home() {
                                         >
                                           {statusLabel(job.status)}
                                         </span>
+                                        <ScanReviewButton
+                                          jobId={job.id}
+                                          status={job.status}
+                                          sceneCount={job.sceneCount}
+                                          reviewStatus={job.reviewStatus}
+                                          compact
+                                          onRefresh={() => {
+                                            void loadJobs();
+                                            if (selectedId === job.id) {
+                                              void loadDetail(job.id);
+                                            }
+                                          }}
+                                        />
                                         <span className="chevron shrink-0 text-sm font-semibold text-[var(--ink-soft)]">
                                           Open →
                                         </span>
@@ -1326,20 +1310,14 @@ function JobBudgetBar({
         <span className="rounded-md border border-[rgba(251,191,36,0.35)] bg-[rgba(251,191,36,0.12)] px-2 py-0.5 text-amber-200">
           all AI
         </span>
-      ) : phase === "google-only" ? (
-        <span className="rounded-md border border-[rgba(251,191,36,0.35)] bg-[rgba(251,191,36,0.12)] px-2 py-0.5 text-amber-200">
-          {g} Google only
-        </span>
       ) : (
         <span className="rounded-md border border-[rgba(96,165,250,0.35)] bg-[rgba(59,130,246,0.14)] px-2 py-0.5 text-[var(--blue-bright)]">
           {g} Google queries
         </span>
       )}
-      {phase === "google-only" ? null : (
-        <span className="rounded-md border border-[rgba(52,211,153,0.3)] bg-[rgba(52,211,153,0.1)] px-2 py-0.5 text-[var(--ok)]">
-          {a} AI images
-        </span>
-      )}
+      <span className="rounded-md border border-[rgba(52,211,153,0.3)] bg-[rgba(52,211,153,0.1)] px-2 py-0.5 text-[var(--ok)]">
+        {a} AI images
+      </span>
       {s > 0 ? (
         <span className="text-[var(--ink-soft)]">{s} scenes</span>
       ) : null}
@@ -1359,76 +1337,118 @@ function JobBudgetBar({
   );
 }
 
-function FinalReviewPanel({
+function canScanJob(input: {
+  status: string;
+  sceneCount: number;
+  reviewStatus?: string | null;
+  scenesLength?: number;
+}): boolean {
+  const hasScenes =
+    input.sceneCount > 0 || (input.scenesLength ?? 0) > 0;
+  const isPastJob = input.status === "completed" || input.status === "failed";
+  const reviewIdle =
+    input.reviewStatus !== "queued" && input.reviewStatus !== "running";
+  return hasScenes && isPastJob && reviewIdle;
+}
+
+function scanReviewLabel(reviewStatus?: string | null, hasResult?: boolean): string {
+  if (reviewStatus === "queued" || reviewStatus === "running") return "Scanning…";
+  if (reviewStatus === "completed" && hasResult) return "Re-scan";
+  return "Scan";
+}
+
+function ScanReviewButton({
   jobId,
   status,
   sceneCount,
   reviewStatus,
-  review,
-  aiBatch,
+  hasResult,
+  scenesLength,
   onRefresh,
+  compact,
 }: {
   jobId: string;
   status: string;
   sceneCount: number;
   reviewStatus?: string | null;
-  review?: FinalReviewPayload | null;
-  aiBatch?: boolean;
+  hasResult?: boolean;
+  scenesLength?: number;
   onRefresh: () => void;
+  /** Smaller variant for job list rows */
+  compact?: boolean;
 }) {
   const [starting, setStarting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
-  const canRun =
-    status === "completed" && sceneCount > 0 && reviewStatus !== "queued" && reviewStatus !== "running";
+  const enabled = canScanJob({ status, sceneCount, reviewStatus, scenesLength });
+  const running = reviewStatus === "queued" || reviewStatus === "running";
 
-  async function startReview() {
+  async function startReview(e?: { stopPropagation(): void; preventDefault(): void }) {
+    e?.stopPropagation();
+    e?.preventDefault();
     setStarting(true);
     setLocalError(null);
     try {
       const res = await fetch(`/api/jobs/${jobId}/review`, { method: "POST" });
       const json = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(json.error || "Failed to start review");
+      if (!res.ok) throw new Error(json.error || "Failed to start scan");
       onRefresh();
-    } catch (e) {
-      setLocalError(e instanceof Error ? e.message : "Review failed");
+    } catch (err) {
+      setLocalError(err instanceof Error ? err.message : "Scan failed");
     } finally {
       setStarting(false);
     }
   }
 
+  if (!enabled && !running) return null;
+
+  return (
+    <span className="inline-flex flex-col items-end gap-1">
+      <button
+        type="button"
+        onClick={(e) => void startReview(e)}
+        disabled={starting || running}
+        title="Scan all scene stills vs narration and topic"
+        className={
+          compact
+            ? "shrink-0 rounded-lg border border-[rgba(96,165,250,0.45)] bg-[rgba(59,130,246,0.14)] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--blue-bright)] hover:bg-[rgba(59,130,246,0.28)] disabled:opacity-50"
+            : "rounded-lg bg-[var(--blue)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--blue-deep)] disabled:opacity-50"
+        }
+      >
+        {starting
+          ? "Starting…"
+          : scanReviewLabel(reviewStatus, hasResult)}
+      </button>
+      {localError && !compact ? (
+        <span className="max-w-[220px] text-right text-xs text-[var(--danger)]">
+          {localError}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function FinalReviewPanel({
+  reviewStatus,
+  review,
+  aiBatch,
+}: {
+  reviewStatus?: string | null;
+  review?: FinalReviewPayload | null;
+  aiBatch?: boolean;
+}) {
   const running = reviewStatus === "queued" || reviewStatus === "running";
   const done = reviewStatus === "completed" && review?.version;
   const majorOnly = (review?.majorIssues || []).filter((i) => i.severity === "major");
   const est = review?.repairEstimate;
 
+  if (!running && !done && reviewStatus !== "failed") return null;
+
   return (
     <div className="mt-6 rounded-2xl border border-[var(--line)] bg-[var(--panel)] px-5 py-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold tracking-[0.18em] text-[var(--blue-bright)] uppercase">
-            Final review
-          </p>
-          <p className="mt-2 text-sm text-[var(--ink-soft)]">
-            Scan every scene still against its narration words and the film topic.
-            Estimates Google queries and AI generations to fix major issues.
-          </p>
-        </div>
-        {canRun ? (
-          <button
-            type="button"
-            onClick={() => void startReview()}
-            disabled={starting}
-            className="rounded-lg bg-[var(--blue)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--blue-deep)] disabled:opacity-50"
-          >
-            {starting ? "Starting…" : "Run final review"}
-          </button>
-        ) : null}
-      </div>
-
-      {localError ? (
-        <p className="mt-3 text-sm text-[var(--danger)]">{localError}</p>
-      ) : null}
+      <p className="text-xs font-semibold tracking-[0.18em] text-[var(--blue-bright)] uppercase">
+        Final review
+      </p>
 
       {running ? (
         <p className="mt-4 text-sm text-white/90">
@@ -1653,15 +1673,26 @@ function JobDetailView({
               : ""}
           </p>
         </div>
-        {detail.status === "failed" ? (
-          <button
-            type="button"
-            onClick={onRetry}
-            className="rounded-lg border border-[var(--line)] px-4 py-2 text-sm font-semibold hover:border-[var(--blue)]"
-          >
-            Retry
-          </button>
-        ) : null}
+        <div className="flex shrink-0 flex-wrap items-center gap-3">
+          <ScanReviewButton
+            jobId={detail.id}
+            status={detail.status}
+            sceneCount={detail.sceneCount || scenes.length}
+            scenesLength={scenes.length}
+            reviewStatus={detail.reviewStatus}
+            hasResult={Boolean(detail.review?.version)}
+            onRefresh={onRefresh}
+          />
+          {detail.status === "failed" ? (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="rounded-lg border border-[var(--line)] px-4 py-2 text-sm font-semibold hover:border-[var(--blue)]"
+            >
+              Retry
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {detail.error ? (
@@ -1674,13 +1705,9 @@ function JobDetailView({
       ) : null}
 
       <FinalReviewPanel
-        jobId={detail.id}
-        status={detail.status}
-        sceneCount={detail.sceneCount || scenes.length}
         reviewStatus={detail.reviewStatus}
         review={detail.review}
         aiBatch={detail.aiBatch}
-        onRefresh={onRefresh}
       />
 
       <div className="mt-8">
