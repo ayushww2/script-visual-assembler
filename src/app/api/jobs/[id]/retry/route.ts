@@ -27,7 +27,9 @@ export async function POST(_req: Request, { params }: Params) {
         status: "queued",
         error: null,
         progress: resumeScenes
-          ? "Re-queued — resuming AI stills from saved scenes…"
+          ? existing.aiBatch && existing.aiBatchId
+            ? `Re-queued — resume AI Batch ${existing.aiBatchId}…`
+            : "Re-queued — resuming AI stills from saved scenes…"
           : "Re-queued — worker will claim shortly…",
         previewDone: resumeScenes ? true : false,
         packageReady: false,
@@ -36,6 +38,9 @@ export async function POST(_req: Request, { params }: Params) {
         completedAt: null,
         // Keep startedAt on resume so wall-time stays honest-ish
         startedAt: resumeScenes ? existing.startedAt : null,
+        // NEVER clear aiBatchId on resume — completed batches must be recoverable
+        aiBatchId: existing.aiBatchId,
+        aiBatch: existing.aiBatch,
       },
     });
 

@@ -74,11 +74,18 @@ export async function processJob(jobId: string): Promise<void> {
         (job.scenesJson as unknown[]).length > 0
       ) {
         let scenes = job.scenesJson as unknown as SceneRecord[];
-        const dirtyGoogle = scenes.filter((s) => isBadGoogleScenePick(s)).length;
-        const misplacedAi = scenes.filter((s) => isMisplacedAiScene(s)).length;
-        const chairCliche = scenes.filter(
-          (s) => isChairClicheAiScene(s) || isWrongChairPersonSwap(s),
-        ).length;
+        const allAi = job.phase === "ai-only";
+        const dirtyGoogle = allAi
+          ? 0
+          : scenes.filter((s) => isBadGoogleScenePick(s)).length;
+        const misplacedAi = allAi
+          ? 0
+          : scenes.filter((s) => isMisplacedAiScene(s)).length;
+        const chairCliche = allAi
+          ? 0
+          : scenes.filter(
+              (s) => isChairClicheAiScene(s) || isWrongChairPersonSwap(s),
+            ).length;
         const missing = scenes.filter((s) => !s.imageUrl?.trim()).length;
 
         await prisma.job.update({
@@ -90,6 +97,8 @@ export async function processJob(jobId: string): Promise<void> {
             packageReady: false,
             packageUrl: null,
             packageError: null,
+            // Keep batch id so a completed OpenAI batch can be re-downloaded
+            aiBatchId: job.aiBatchId,
             progress:
               dirtyGoogle > 0 || misplacedAi > 0 || chairCliche > 0
                 ? `Repair sources · ${dirtyGoogle} dirty Google · ${misplacedAi} AI→Google · ${chairCliche} chair cliché · then ${missing} AI…`
@@ -100,7 +109,7 @@ export async function processJob(jobId: string): Promise<void> {
         });
 
         // ONLY replace dirty Google picks (wrong person / logo / watermark).
-        // Good Google + finished abstract AI stay as-is.
+        // Skipped for ai-only jobs.
         if (dirtyGoogle > 0) {
           const repaired = await repairBadGoogleScenes({
             scenes,
@@ -172,7 +181,7 @@ export async function processJob(jobId: string): Promise<void> {
             });
           },
           parts: PARALLEL_PARTS,
-          useBatch: Boolean(job.aiBatch),
+          useBatch: Boolean(job.aiBatch) || allAi,
           existingBatchId: job.aiBatchId,
           onBatchCreated: async (batchId) => {
             await prisma.job.update({

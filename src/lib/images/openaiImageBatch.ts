@@ -34,12 +34,20 @@ const POLL_MS = 30_000;
 /**
  * OpenAI Batch API for /v1/images/generations — ~50% cheaper, up to 24h.
  * Same model/size/quality as realtime gpt-image-2.
+ *
+ * IMPORTANT: never load the full output JSONL as one JS string — 300+ b64
+ * PNGs exceed Node's max string length (~512MB) and crash the job.
  */
 export async function generateGptImagesViaBatch(input: {
   requests: BatchImageRequest[];
   existingBatchId?: string | null;
   onBatchCreated?: (batchId: string) => Promise<void> | void;
   onProgress?: (message: string) => Promise<void> | void;
+  /**
+   * Optional streaming sink — called once per output line with image bytes.
+   * When provided, bytes are NOT retained in the returned Map (saves RAM).
+   */
+  onImage?: (result: BatchImageResult) => Promise<void> | void;
 }): Promise<Map<string, BatchImageResult>> {
   if (!input.requests.length) return new Map();
 
@@ -103,7 +111,7 @@ export async function generateGptImagesViaBatch(input: {
 
     if (batch.status === "completed") {
       await input.onProgress?.(
-        `AI Batch complete · ${done}/${total} ok · ${failed} failed — downloading…`,
+        `AI Batch complete · ${done}/${total} ok · ${failed} failed — streaming download…`,
       );
       break;
     }
@@ -130,84 +138,41 @@ export async function generateGptImagesViaBatch(input: {
     throw new Error(`AI Batch ${batchId} completed with no output_file_id`);
   }
 
-  const raw = await openai.files.content(batch.output_file_id);
-  const text = await raw.text();
   const out = new Map<string, BatchImageResult>();
+  let parsed = 0;
+  let images = 0;
 
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    let parsed: BatchLineOut;
-    try {
-      parsed = JSON.parse(line) as BatchLineOut;
-    } catch {
-      continue;
-    }
-    const customId = parsed.custom_id || "";
-    if (!customId) continue;
+  await streamBatchOutputLines(batch.output_file_id, async (line) => {
+    let result = parseBatchOutputLine(line);
+    if (!result) return;
+    parsed += 1;
 
-    if (parsed.error?.message) {
-      out.set(customId, { customId, error: parsed.error.message });
-      continue;
+    if (result.error?.startsWith("URL_PENDING:")) {
+      result = await resolvePendingBatchUrl(result);
     }
 
-    const status = parsed.response?.status_code ?? 0;
-    const body = parsed.response?.body;
-    if (status >= 400 || body?.error?.message) {
-      out.set(customId, {
-        customId,
-        error: body?.error?.message || `HTTP ${status}`,
-      });
-      continue;
-    }
-
-    const first = body?.data?.[0];
-    if (!first) {
-      out.set(customId, { customId, error: "No image data in batch response" });
-      continue;
-    }
-
-    try {
-      if (first.b64_json) {
-        out.set(customId, {
-          customId,
-          bytes: Buffer.from(first.b64_json, "base64"),
-          contentType: "image/png",
-        });
-      } else if (first.url) {
-        const res = await fetch(first.url, {
-          headers: { "User-Agent": "ScriptAssembler/1.0" },
-          signal: AbortSignal.timeout(60_000),
-        });
-        if (!res.ok) {
-          out.set(customId, {
-            customId,
-            error: `Download failed (${res.status})`,
-          });
-          continue;
-        }
-        const contentType = (res.headers.get("content-type") || "image/png")
-          .split(";")[0]
-          .trim();
-        out.set(customId, {
-          customId,
-          bytes: Buffer.from(await res.arrayBuffer()),
-          contentType: contentType.startsWith("image/")
-            ? contentType
-            : "image/png",
+    if (result.bytes) {
+      images += 1;
+      if (input.onImage) {
+        await input.onImage(result);
+        // Keep status only — drop bytes so we don't hold hundreds of PNGs in RAM
+        out.set(result.customId, {
+          customId: result.customId,
+          contentType: result.contentType,
         });
       } else {
-        out.set(customId, {
-          customId,
-          error: "Batch image missing b64_json and url",
-        });
+        out.set(result.customId, result);
       }
-    } catch (err) {
-      out.set(customId, {
-        customId,
-        error: err instanceof Error ? err.message : "Batch image parse failed",
-      });
+    } else {
+      out.set(result.customId, result);
     }
-  }
+
+    if (parsed === 1 || parsed % 25 === 0) {
+      await input.onProgress?.(
+        `AI Batch stream · ${parsed} lines · ${images} images…`,
+      );
+    }
+  });
 
   // Ensure every request has an entry
   for (const req of input.requests) {
@@ -219,7 +184,143 @@ export async function generateGptImagesViaBatch(input: {
     }
   }
 
+  await input.onProgress?.(
+    `AI Batch parsed · ${images} images · ${parsed} lines`,
+  );
+
   return out;
+}
+
+/** Download batch output and invoke onLine per JSONL row — never one giant string. */
+export async function streamBatchOutputLines(
+  outputFileId: string,
+  onLine: (line: string) => Promise<void> | void,
+): Promise<void> {
+  const openai = createOpenAiImageClient();
+  const raw = await openai.files.content(outputFileId);
+  const body = (raw as unknown as { body?: ReadableStream<Uint8Array> | null })
+    .body;
+
+  if (body && typeof body.getReader === "function") {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let carry = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      carry += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = carry.indexOf("\n")) >= 0) {
+        const line = carry.slice(0, nl);
+        carry = carry.slice(nl + 1);
+        if (line.trim()) await onLine(line);
+      }
+      // Hard safety: a single JSONL row should never approach Node string limits.
+      if (carry.length > 80_000_000) {
+        throw new Error(
+          "AI Batch output line exceeded 80MB — refusing to buffer (corrupt/huge row)",
+        );
+      }
+    }
+    carry += decoder.decode();
+    if (carry.trim()) await onLine(carry);
+    return;
+  }
+
+  // Fallback: arrayBuffer + walk bytes for newlines (still avoids one .text())
+  const buf = Buffer.from(await raw.arrayBuffer());
+  let start = 0;
+  for (let i = 0; i < buf.length; i++) {
+    if (buf[i] !== 0x0a) continue;
+    const line = buf.toString("utf8", start, i);
+    start = i + 1;
+    if (line.trim()) await onLine(line);
+  }
+  if (start < buf.length) {
+    const line = buf.toString("utf8", start);
+    if (line.trim()) await onLine(line);
+  }
+}
+
+export function parseBatchOutputLine(line: string): BatchImageResult | null {
+  let parsed: BatchLineOut;
+  try {
+    parsed = JSON.parse(line) as BatchLineOut;
+  } catch {
+    return null;
+  }
+  const customId = parsed.custom_id || "";
+  if (!customId) return null;
+
+  if (parsed.error?.message) {
+    return { customId, error: parsed.error.message };
+  }
+
+  const status = parsed.response?.status_code ?? 0;
+  const body = parsed.response?.body;
+  if (status >= 400 || body?.error?.message) {
+    return {
+      customId,
+      error: body?.error?.message || `HTTP ${status}`,
+    };
+  }
+
+  const first = body?.data?.[0];
+  if (!first) {
+    return { customId, error: "No image data in batch response" };
+  }
+
+  if (first.b64_json) {
+    return {
+      customId,
+      bytes: Buffer.from(first.b64_json, "base64"),
+      contentType: "image/png",
+    };
+  }
+
+  if (first.url) {
+    // URL fetch is async — mark for caller; sync parse can't await here.
+    // Store URL as error-ish marker? Better: return custom shape.
+    // For streaming path we handle URL below in async helper.
+    return {
+      customId,
+      error: `URL_PENDING:${first.url}`,
+    };
+  }
+
+  return { customId, error: "Batch image missing b64_json and url" };
+}
+
+/** Resolve URL_PENDING errors into downloaded bytes. */
+export async function resolvePendingBatchUrl(
+  result: BatchImageResult,
+): Promise<BatchImageResult> {
+  const pending = result.error?.startsWith("URL_PENDING:")
+    ? result.error.slice("URL_PENDING:".length)
+    : null;
+  if (!pending) return result;
+  try {
+    const res = await fetch(pending, {
+      headers: { "User-Agent": "ScriptAssembler/1.0" },
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) {
+      return { customId: result.customId, error: `Download failed (${res.status})` };
+    }
+    const contentType = (res.headers.get("content-type") || "image/png")
+      .split(";")[0]
+      .trim();
+    return {
+      customId: result.customId,
+      bytes: Buffer.from(await res.arrayBuffer()),
+      contentType: contentType.startsWith("image/") ? contentType : "image/png",
+    };
+  } catch (err) {
+    return {
+      customId: result.customId,
+      error: err instanceof Error ? err.message : "Batch image URL download failed",
+    };
+  }
 }
 
 function sleep(ms: number) {

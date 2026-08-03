@@ -175,56 +175,77 @@ async function generateMissingAiStillsBatch(
     title?: string | null;
     scenes: SceneRecord[];
     onProgress?: AiStillProgress;
+    onScenesPersist?: AiScenesPersist;
     existingBatchId?: string | null;
     onBatchCreated?: (batchId: string) => Promise<void> | void;
   },
   needAi: SceneRecord[],
 ): Promise<SceneRecord[]> {
   const byId = new Map(input.scenes.map((s) => [s.id, { ...s }]));
+  const byCustomId = new Map<string, SceneRecord>(
+    needAi.map((scene) => [`scene-${scene.index}`, scene]),
+  );
 
   const requests = needAi.map((scene) => ({
     customId: `scene-${scene.index}`,
     prompt: promptForScene(scene, input.title),
   }));
 
-  const results = await generateGptImagesViaBatch({
+  let uploaded = 0;
+  let failed = 0;
+  let lastPersistAt = 0;
+
+  await generateGptImagesViaBatch({
     requests,
     existingBatchId: input.existingBatchId,
     onBatchCreated: input.onBatchCreated,
     onProgress: input.onProgress,
+    // Upload each image as the JSONL streams — never hold all PNGs in RAM,
+    // and never load the whole batch file as one JS string.
+    onImage: async (hit) => {
+      const scene = byCustomId.get(hit.customId);
+      if (!scene || !hit.bytes) {
+        failed += 1;
+        return;
+      }
+      const ext = (hit.contentType || "image/png").includes("jpeg")
+        ? "jpg"
+        : "png";
+      const key = stillKey(input.jobId, scene.index, ext, hit.bytes);
+      const put = await uploadToR2({
+        key,
+        body: hit.bytes,
+        contentType: hit.contentType || "image/png",
+      });
+      byId.set(scene.id, {
+        ...scene,
+        visualSource:
+          scene.visualSource === "unassigned" ? "ai" : scene.visualSource,
+        imageUrl: put.url,
+        thumbnailUrl: put.url,
+        r2Url: put.url,
+        why: finalizeAiWhy(scene, "AI documentary realism still (Batch API)"),
+      });
+      uploaded += 1;
+      if (uploaded === 1 || uploaded % 10 === 0 || uploaded === needAi.length) {
+        await input.onProgress?.(
+          `AI Batch upload R2 ${uploaded}/${needAi.length}` +
+            (failed ? ` · ${failed} failed` : ""),
+        );
+      }
+      const now = Date.now();
+      if (now - lastPersistAt >= 8_000 || uploaded === needAi.length) {
+        lastPersistAt = now;
+        const snap = input.scenes.map((s) => byId.get(s.id) || s);
+        await input.onScenesPersist?.(snap);
+      }
+    },
   });
 
-  let uploaded = 0;
-  let failed = 0;
+  // Count batch rows that never produced bytes
   for (const scene of needAi) {
-    const hit = results.get(`scene-${scene.index}`);
-    if (!hit?.bytes) {
-      failed += 1;
-      continue;
-    }
-    const ext = (hit.contentType || "image/png").includes("jpeg") ? "jpg" : "png";
-    const key = stillKey(input.jobId, scene.index, ext, hit.bytes);
-    const put = await uploadToR2({
-      key,
-      body: hit.bytes,
-      contentType: hit.contentType || "image/png",
-    });
-    byId.set(scene.id, {
-      ...scene,
-      visualSource:
-        scene.visualSource === "unassigned" ? "ai" : scene.visualSource,
-      imageUrl: put.url,
-      thumbnailUrl: put.url,
-      r2Url: put.url,
-      why: finalizeAiWhy(scene, "AI documentary realism still (Batch API)"),
-    });
-    uploaded += 1;
-    if (uploaded === 1 || uploaded % 10 === 0 || uploaded === needAi.length) {
-      await input.onProgress?.(
-        `AI Batch upload R2 ${uploaded}/${needAi.length}` +
-          (failed ? ` · ${failed} failed` : ""),
-      );
-    }
+    const current = byId.get(scene.id);
+    if (!current?.imageUrl?.trim()) failed += 1;
   }
 
   if (uploaded === 0 && needAi.length > 0) {
