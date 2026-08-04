@@ -152,6 +152,21 @@ type FinalReviewPayload = {
   };
   scanCostUsd?: number;
   usage?: { inputTokens: number; outputTokens: number };
+  lastFix?: IssueFixerResult & { at: string };
+};
+
+type IssueFixerResult = {
+  attempted: number;
+  fixedGoogle: number;
+  fixedRepick: number;
+  failed: number;
+  queriesUsed: number;
+  skippedQueryCap: number;
+  fixedIndexes: number[];
+  skippedIndexes: number[];
+  failedIndexes: number[];
+  packageReady: boolean;
+  packageUrl: string | null;
 };
 
 type Capacity = {
@@ -1536,19 +1551,23 @@ function ScanReviewButton({
 }
 
 function FinalReviewPanel({
+  jobId,
   reviewStatus,
   review,
   clientReview,
   clientScanning,
   clientProgress,
   aiBatch,
+  onFixed,
 }: {
+  jobId: string;
   reviewStatus?: string | null;
   review?: FinalReviewPayload | null;
   clientReview?: FinalReviewPayload | null;
   clientScanning?: boolean;
   clientProgress?: string | null;
   aiBatch?: boolean;
+  onFixed?: (result: IssueFixerResult, review: FinalReviewPayload) => void;
 }) {
   const running =
     reviewStatus === "queued" ||
@@ -1647,6 +1666,14 @@ function FinalReviewPanel({
             </div>
           ) : null}
 
+          {effectiveReview ? (
+            <IssueFixerPanel
+              jobId={jobId}
+              review={effectiveReview}
+              onFixed={onFixed}
+            />
+          ) : null}
+
           {majorOnly.length > 0 ? (
             <div>
               <p className="text-xs font-semibold tracking-[0.16em] text-[var(--danger)] uppercase">
@@ -1684,6 +1711,129 @@ function FinalReviewPanel({
           )}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+const ISSUE_FIXER_MAX_GOOGLE_QUERIES = 100;
+
+/** Auto-fixes google_requery / google_repick issues, capped at 100 fresh Google searches per click. */
+function IssueFixerPanel({
+  jobId,
+  review,
+  onFixed,
+}: {
+  jobId: string;
+  review: FinalReviewPayload;
+  onFixed?: (result: IssueFixerResult, review: FinalReviewPayload) => void;
+}) {
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<IssueFixerResult | null>(
+    review.lastFix || null,
+  );
+
+  const fixableIssues = (review.majorIssues || []).filter(
+    (i) => i.fixType === "google_requery" || i.fixType === "google_repick",
+  );
+  const alreadyFixed = new Set(result?.fixedIndexes || []);
+  const remainingIssues = fixableIssues.filter(
+    (i) => !alreadyFixed.has(i.index),
+  );
+  const remainingQueries = new Set(
+    remainingIssues
+      .filter((i) => i.fixType === "google_requery")
+      .map((i) => (i.suggestedQuery || "").trim().toLowerCase()),
+  ).size;
+
+  async function runFixer(onlyIndexes?: number[]) {
+    setRunning(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/fix`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          maxGoogleQueries: ISSUE_FIXER_MAX_GOOGLE_QUERIES,
+          majorIssues: review.majorIssues,
+          onlyIndexes,
+        }),
+      });
+      const json = (await res.json()) as {
+        error?: string;
+        result?: IssueFixerResult;
+      };
+      if (!res.ok || !json.result) {
+        throw new Error(json.error || "Issue fixer failed");
+      }
+      setResult(json.result);
+      onFixed?.(json.result, review);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Issue fixer failed");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  if (!fixableIssues.length) return null;
+
+  return (
+    <div className="rounded-xl border border-[rgba(52,211,153,0.28)] bg-[rgba(52,211,153,0.06)] px-4 py-4">
+      <p className="text-xs font-semibold tracking-[0.16em] text-[var(--ok)] uppercase">
+        Issue fixer
+      </p>
+
+      {result ? (
+        <div className="mt-3 space-y-1 text-sm text-white/90">
+          <p>
+            Fixed <strong>{result.fixedGoogle + result.fixedRepick}</strong>/
+            {result.attempted} scenes · <strong>{result.queriesUsed}</strong>{" "}
+            Google {result.queriesUsed === 1 ? "query" : "queries"} used
+            {result.failed > 0 ? (
+              <span className="text-[var(--danger)]"> · {result.failed} failed</span>
+            ) : null}
+          </p>
+          <p className="text-[var(--ink-soft)]">
+            {result.packageReady
+              ? "Render package updated."
+              : "Package rebuild pending."}{" "}
+            Re-scan to verify the fixes.
+          </p>
+        </div>
+      ) : (
+        <p className="mt-3 text-sm text-[var(--ink-soft)]">
+          Auto-fixes photographable-subject and bad-pick issues with a real
+          Google photo (max {ISSUE_FIXER_MAX_GOOGLE_QUERIES} fresh searches
+          per run).
+        </p>
+      )}
+
+      {error ? (
+        <p className="mt-2 text-sm text-[var(--danger)]">{error}</p>
+      ) : null}
+
+      <div className="mt-3 flex flex-wrap gap-3">
+        {remainingIssues.length > 0 ? (
+          <button
+            type="button"
+            disabled={running}
+            onClick={() =>
+              void runFixer(
+                result ? remainingIssues.map((i) => i.index) : undefined,
+              )
+            }
+            className="rounded-lg bg-[var(--ok)] px-4 py-2 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-50"
+          >
+            {running
+              ? "Fixing…"
+              : result
+                ? `Fix remaining ${remainingIssues.length} issues (${Math.min(remainingQueries, ISSUE_FIXER_MAX_GOOGLE_QUERIES)} more searches)`
+                : `Fix issues (up to ${Math.min(remainingQueries, ISSUE_FIXER_MAX_GOOGLE_QUERIES)} Google searches)`}
+          </button>
+        ) : (
+          <p className="text-sm text-[var(--ink-soft)]">All fixable issues resolved.</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -1851,12 +2001,27 @@ function JobDetailView({
       ) : null}
 
       <FinalReviewPanel
+        jobId={detail.id}
         reviewStatus={detail.reviewStatus}
         review={detail.review}
         clientReview={clientReview}
         clientScanning={clientScanning}
         clientProgress={clientProgress}
         aiBatch={detail.aiBatch}
+        onFixed={(result, usedReview) => {
+          const usedServerReview =
+            detail.reviewStatus === "completed" && detail.review?.version;
+          if (usedServerReview) {
+            onRefresh();
+          } else {
+            const merged: FinalReviewPayload = {
+              ...usedReview,
+              lastFix: { ...result, at: new Date().toISOString() },
+            };
+            setClientReview(merged);
+            saveClientScan(detail.id, merged);
+          }
+        }}
       />
 
       <div className="mt-8">
