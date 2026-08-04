@@ -40,49 +40,68 @@ export type IssueFixerResult = {
 type LastFix = IssueFixerResult & { at: string };
 
 /**
- * Descriptor suffixes stripped off a suggested query to find its broader
- * "core subject" — e.g. "kathu townlands stone tools", "kathu townlands
- * excavation", and "kathu townlands landscape" all collapse to "kathu
- * townlands". Narrow multi-word variants of one real-world subject rarely
- * have enough distinct stock photography to each succeed on their own;
- * searching the shared core once finds a photo far more reliably and lets
- * every scene about that subject reuse it.
+ * Generic qualifier/descriptor words stripped out when clustering queries by
+ * subject — everything left over should be the proper nouns / specific terms
+ * that actually identify the real-world subject (a place, person, or find).
  */
-const QUERY_QUALIFIER_SUFFIXES = [
-  "excavation site",
-  "archaeological site",
-  "excavation",
-  "archaeology",
-  "archaeologist",
-  "stone tools",
-  "spear points",
-  "artifacts",
-  "stratigraphy",
-  "development",
-  "landscape",
-  "interior",
-  "exterior",
-  "aerial",
-  "portrait",
-  "discovery",
-  "researcher",
-  "professor",
-  "scientist",
-  "tools",
-  "site",
-  "photo",
-  "photograph",
-].sort((a, b) => b.length - a.length);
+const CORE_SUBJECT_STOPWORDS = new Set([
+  "excavation", "excavations", "archaeological", "archaeology", "archaeologist",
+  "site", "sites", "stone", "tools", "tool", "spear", "spears", "point", "points",
+  "artifact", "artifacts", "stratigraphy", "development", "landscape", "interior",
+  "exterior", "aerial", "portrait", "discovery", "researcher", "professor",
+  "scientist", "photo", "photograph", "hand", "axe", "axes", "handaxe", "handaxes",
+  "closeup", "edge", "edges", "museum", "map", "maps", "fossil", "fossils",
+  "fauna", "skull", "entrance", "trench", "system", "riverbed", "river",
+  "water", "hills", "cave", "caves", "complex", "evidence", "fire",
+  "primatologist", "someone", "lit", "clear", "blue", "mountains",
+  "underwater", "vehicle", "documentary", "photographic", "still", "shot",
+]);
 
-function coreSubjectKey(query: string): string {
-  const q = query.trim().toLowerCase().replace(/\s+/g, " ");
-  for (const suffix of QUERY_QUALIFIER_SUFFIXES) {
-    if (q.endsWith(` ${suffix}`)) {
-      const stripped = q.slice(0, -(suffix.length + 1)).trim();
-      if (stripped) return stripped;
+function significantTokens(query: string): string[] {
+  return query
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length >= 4 && !CORE_SUBJECT_STOPWORDS.has(t));
+}
+
+/**
+ * Cluster queries that share at least one specific/proper-noun token — e.g.
+ * "kathu townlands excavation", "kathu townlands fossils", and "kathu
+ * townlands landscape" all share "kathu"/"townlands" and collapse to one
+ * cluster; "nossob molopo river system" and "nossob riverbed kalahari"
+ * collapse via the shared "nossob" token even though the rest of the
+ * phrasing differs. Narrow multi-word variants of the same real-world
+ * subject rarely have enough distinct stock photography to each succeed on
+ * their own — searching the cluster once finds a photo far more reliably
+ * and lets every related scene reuse it. Returns a root id per input index
+ * (union-find over shared tokens).
+ */
+function clusterQueriesByToken(rawQueries: string[]): number[] {
+  const parent = rawQueries.map((_, i) => i);
+  function find(x: number): number {
+    while (parent[x] !== x) {
+      parent[x] = parent[parent[x]];
+      x = parent[x];
     }
+    return x;
   }
-  return q;
+  function union(a: number, b: number) {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  }
+
+  const tokenToFirstIndex = new Map<string, number>();
+  rawQueries.forEach((q, i) => {
+    for (const tok of significantTokens(q)) {
+      const prev = tokenToFirstIndex.get(tok);
+      if (prev !== undefined) union(prev, i);
+      else tokenToFirstIndex.set(tok, i);
+    }
+  });
+
+  return rawQueries.map((_, i) => find(i));
 }
 
 function emptyResult(job: { packageReady: boolean; packageUrl: string | null }): IssueFixerResult {
@@ -160,20 +179,30 @@ export async function runIssueFixer(input: {
   const used = new Set(scenes.filter((s) => s.imageUrl).map((s) => s.imageUrl!));
 
   const repickIndexes: number[] = [];
-  const requeryGroups = new Map<string, { query: string; sceneIndexes: number[] }>();
+  const requeryEntries: Array<{ sceneIndex: number; rawQuery: string }> = [];
 
   for (const [sceneIndex, issue] of toFix) {
     if (issue.fixType === "google_repick") {
       repickIndexes.push(sceneIndex);
       continue;
     }
-    const raw = (issue.suggestedQuery || "documentary photo").trim() || "documentary photo";
-    const core = coreSubjectKey(raw) || raw.toLowerCase();
-    const group =
-      requeryGroups.get(core) || { query: core, sceneIndexes: [] as number[] };
-    group.sceneIndexes.push(sceneIndex);
-    requeryGroups.set(core, group);
+    const rawQuery = (issue.suggestedQuery || "documentary photo").trim() || "documentary photo";
+    requeryEntries.push({ sceneIndex, rawQuery });
   }
+
+  const clusterIds = clusterQueriesByToken(requeryEntries.map((e) => e.rawQuery));
+  const requeryGroups = new Map<number, { query: string; sceneIndexes: number[] }>();
+  requeryEntries.forEach((entry, i) => {
+    const root = clusterIds[i];
+    const group = requeryGroups.get(root) || { query: entry.rawQuery, sceneIndexes: [] as number[] };
+    // Prefer the shortest phrasing in the cluster as the actual search text —
+    // broader/shorter queries are more likely to return usable real photos.
+    if (entry.rawQuery.split(/\s+/).length < group.query.split(/\s+/).length) {
+      group.query = entry.rawQuery;
+    }
+    group.sceneIndexes.push(entry.sceneIndex);
+    requeryGroups.set(root, group);
+  });
 
   const attempted = toFix.size;
   const fixedIndexes: number[] = [];
