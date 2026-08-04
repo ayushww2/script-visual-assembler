@@ -7,6 +7,7 @@ import { mapPool } from "@/lib/jobs/pool";
 import {
   pickBestGoogleHit,
   searchGoogleImages,
+  type GoogleImageHit,
   type GoogleSearchPreview,
 } from "@/lib/search/google";
 import { resolveGoogleSubject } from "@/lib/search/resolveSubject";
@@ -201,12 +202,21 @@ export async function runIssueFixer(input: {
         );
       }
 
+      // Groups with many scenes on one narrow subject (e.g. 15 beats about the
+      // same dig site) quickly exhaust the pool of distinct clean hits from a
+      // single search. Once no fresh candidate remains, reuse the group's
+      // best hit instead of failing the scene — matches this app's existing
+      // "reuse adjacent still" policy (see reuseStills.ts) and is standard
+      // documentary editing practice for repeated B-roll of one subject.
+      let groupBestHit: GoogleImageHit | null = null;
       for (const sceneIndex of group.sceneIndexes) {
         const i = byIndex.get(sceneIndex)!;
         const scene = scenes[i];
-        const hit = pickBestGoogleHit(preview, { usedUrls: used, personName, placeName });
+        const freshHit = pickBestGoogleHit(preview, { usedUrls: used, personName, placeName });
+        const hit: GoogleImageHit | null = freshHit || groupBestHit;
         if (hit?.imageUrl) {
           used.add(hit.imageUrl);
+          if (!groupBestHit) groupBestHit = hit;
           scenes[i] = {
             ...scene,
             visualSource: "google",
@@ -220,7 +230,9 @@ export async function runIssueFixer(input: {
               .map((r) => r.imageUrl)
               .filter(Boolean)
               .slice(0, 8),
-            why: `Issue fixer · Google requery: ${group.query}`,
+            why: freshHit
+              ? `Issue fixer · Google requery: ${group.query}`
+              : `Issue fixer · Google requery (reused still): ${group.query}`,
             r2Url: null,
           };
           fixedGoogle += 1;
