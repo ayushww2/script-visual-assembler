@@ -39,6 +39,52 @@ export type IssueFixerResult = {
 
 type LastFix = IssueFixerResult & { at: string };
 
+/**
+ * Descriptor suffixes stripped off a suggested query to find its broader
+ * "core subject" — e.g. "kathu townlands stone tools", "kathu townlands
+ * excavation", and "kathu townlands landscape" all collapse to "kathu
+ * townlands". Narrow multi-word variants of one real-world subject rarely
+ * have enough distinct stock photography to each succeed on their own;
+ * searching the shared core once finds a photo far more reliably and lets
+ * every scene about that subject reuse it.
+ */
+const QUERY_QUALIFIER_SUFFIXES = [
+  "excavation site",
+  "archaeological site",
+  "excavation",
+  "archaeology",
+  "archaeologist",
+  "stone tools",
+  "spear points",
+  "artifacts",
+  "stratigraphy",
+  "development",
+  "landscape",
+  "interior",
+  "exterior",
+  "aerial",
+  "portrait",
+  "discovery",
+  "researcher",
+  "professor",
+  "scientist",
+  "tools",
+  "site",
+  "photo",
+  "photograph",
+].sort((a, b) => b.length - a.length);
+
+function coreSubjectKey(query: string): string {
+  const q = query.trim().toLowerCase().replace(/\s+/g, " ");
+  for (const suffix of QUERY_QUALIFIER_SUFFIXES) {
+    if (q.endsWith(` ${suffix}`)) {
+      const stripped = q.slice(0, -(suffix.length + 1)).trim();
+      if (stripped) return stripped;
+    }
+  }
+  return q;
+}
+
 function emptyResult(job: { packageReady: boolean; packageUrl: string | null }): IssueFixerResult {
   return {
     attempted: 0,
@@ -121,14 +167,12 @@ export async function runIssueFixer(input: {
       repickIndexes.push(sceneIndex);
       continue;
     }
-    const q =
-      (issue.suggestedQuery || "documentary photo").trim().toLowerCase() ||
-      "documentary photo";
+    const raw = (issue.suggestedQuery || "documentary photo").trim() || "documentary photo";
+    const core = coreSubjectKey(raw) || raw.toLowerCase();
     const group =
-      requeryGroups.get(q) ||
-      { query: issue.suggestedQuery || "documentary photo", sceneIndexes: [] as number[] };
+      requeryGroups.get(core) || { query: core, sceneIndexes: [] as number[] };
     group.sceneIndexes.push(sceneIndex);
-    requeryGroups.set(q, group);
+    requeryGroups.set(core, group);
   }
 
   const attempted = toFix.size;
