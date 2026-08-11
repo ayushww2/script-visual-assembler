@@ -1,4 +1,5 @@
 import type { Beat } from "./schema";
+import { getNiche, type NicheId } from "@/lib/niches";
 
 type WhisperSegment = {
   id?: string | number;
@@ -7,22 +8,43 @@ type WhisperSegment = {
   end?: number;
 };
 
+export type ParseBeatsOptions = {
+  nicheId?: string | null;
+  /** Override WPM for niche-aware pacing (celebrity calm cuts). */
+  wpm?: number;
+};
+
 /**
  * Accepts:
  * - plain script text
  * - Whisper-style JSON: { segments: [{ id, text, start, end }] }
  * - raw JSON array of segments
  *
- * Plain script pacing (160 WPM):
+ * Mystery plain-script pacing (160 WPM) — UNCHANGED:
  * - First ~100 words: fast cuts (≈2–4s → ~5–11 words), keep short punch lines alone
  * - Rest: target ~11 words (~4.1s), clamp 8–15 when merging
+ *
+ * Celebrity plain-script pacing (130 WPM experiment):
+ * - Calm ~4–7s scenes driven by the script
+ * - Never cut mid-sentence; merge short sentences when it still fits ~4–7s
  */
-export function parseBeats(input: string): Beat[] {
+export function parseBeats(
+  input: string,
+  opts?: ParseBeatsOptions,
+): Beat[] {
   const trimmed = input.trim();
   if (!trimmed) return [];
 
   const fromJson = tryParseWhisper(trimmed);
   if (fromJson) return fromJson;
+
+  const nicheId = (opts?.nicheId || undefined) as NicheId | undefined;
+  const niche = getNiche(nicheId);
+  const wpm = opts?.wpm || niche.wpm;
+
+  if (niche.id === "celebrity") {
+    return splitScriptTextCelebrity(trimmed, wpm);
+  }
 
   return splitScriptText(trimmed);
 }
@@ -56,6 +78,7 @@ function tryParseWhisper(raw: string): Beat[] | null {
   }
 }
 
+/** Mystery path — keep historical behavior exactly. */
 function splitScriptText(script: string): Beat[] {
   const normalized = script.replace(/\r\n/g, "\n").trim();
   const paragraphs = normalized
@@ -81,6 +104,176 @@ function splitScriptText(script: string): Beat[] {
     id: `b${i + 1}`,
     text,
   }));
+}
+
+/**
+ * Celebrity experiment: calm ~4–6s scenes from the script at niche WPM.
+ * Prefer whole sentences; only split long lines at natural clause pauses
+ * (comma / dash / semicolon) so a ~31 min / 130 WPM film lands ≥300 stills.
+ * Never slice mid-phrase.
+ */
+function splitScriptTextCelebrity(script: string, wpm: number): Beat[] {
+  const wps = Math.max(1, wpm) / 60;
+  // Prefer denser stills: ~4–6s (≈9–13 words @ 130 WPM).
+  const minWords = Math.max(4, Math.ceil(4 * wps));
+  const maxWords = Math.max(minWords + 1, Math.floor(6.25 * wps));
+  const targetWords = Math.max(minWords, Math.round(5.25 * wps));
+
+  const normalized = script.replace(/\r\n/g, "\n").trim();
+  const paragraphs = normalized
+    .split(/\n+/)
+    .map((p) => p.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  const clauses: string[] = [];
+  for (const p of paragraphs) {
+    for (const sentence of splitSentences(p)) {
+      clauses.push(...splitLongSentenceIntoClauses(sentence, minWords, maxWords));
+    }
+  }
+
+  const units: string[] = [];
+  let buf: string[] = [];
+  let bufWords = 0;
+
+  const flush = () => {
+    if (!buf.length) return;
+    units.push(buf.join(" "));
+    buf = [];
+    bufWords = 0;
+  };
+
+  // Only absorb tiny leftovers into neighbors (keep denser scene count).
+  const hardMaxWords = Math.max(maxWords + 2, Math.floor(8 * wps));
+
+  for (const clause of clauses) {
+    const wc = wordCount(clause);
+    if (!wc) continue;
+
+    if (wc > maxWords && bufWords === 0) {
+      units.push(clause);
+      continue;
+    }
+
+    if (bufWords > 0 && bufWords + wc > maxWords) {
+      if (!(bufWords < minWords && bufWords + wc <= hardMaxWords)) {
+        flush();
+      }
+    }
+
+    buf.push(clause);
+    bufWords += wc;
+
+    // Flush early once we hit a calm beat — denser stills for long films.
+    if (
+      bufWords >= targetWords ||
+      (bufWords >= minWords && /[?]$/.test(clause.trim()))
+    ) {
+      flush();
+    }
+  }
+  flush();
+
+  // Only glue truly tiny fragments (< ~3s), not calm short lines.
+  const tinyWords = Math.max(3, Math.floor(3 * wps));
+  // Allow a bit more room when absorbing 1–3 word punch leftovers.
+  const paced = rebalanceCelebrityUnits(
+    units,
+    tinyWords,
+    Math.max(hardMaxWords, Math.floor(11 * wps)),
+  );
+
+  return paced.map((text, i) => ({
+    id: `b${i + 1}`,
+    text,
+  }));
+}
+
+/**
+ * Split an oversized sentence at natural pauses so visuals can change
+ * without cutting mid-phrase (e.g. "...troubling people," / "even after...").
+ */
+function splitLongSentenceIntoClauses(
+  sentence: string,
+  minWords: number,
+  maxWords: number,
+): string[] {
+  const wc = wordCount(sentence);
+  if (wc <= maxWords) return [sentence];
+
+  // Prefer stronger pauses first.
+  const parts = sentence
+    .split(/(?<=[,;:—–])\s+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length < 2) return [sentence];
+
+  const out: string[] = [];
+  let buf: string[] = [];
+  let bufWords = 0;
+  const flush = () => {
+    if (!buf.length) return;
+    out.push(buf.join(" "));
+    buf = [];
+    bufWords = 0;
+  };
+
+  for (const part of parts) {
+    const pw = wordCount(part);
+    if (bufWords > 0 && bufWords + pw > maxWords && bufWords >= minWords) {
+      flush();
+    }
+    buf.push(part);
+    bufWords += pw;
+    if (bufWords >= maxWords) flush();
+  }
+  flush();
+
+  // If a trailing fragment is tiny, glue it back onto the previous clause.
+  if (out.length >= 2 && wordCount(out[out.length - 1]) < minWords) {
+    const tail = out.pop()!;
+    out[out.length - 1] = `${out[out.length - 1]} ${tail}`;
+  }
+
+  return out.length ? out : [sentence];
+}
+
+/** Merge leftover short celebrity units into neighbors (never split). */
+function rebalanceCelebrityUnits(
+  units: string[],
+  minWords: number,
+  hardMaxWords: number,
+): string[] {
+  if (units.length < 2) return units;
+  const out = [...units];
+  let i = 0;
+  while (i < out.length) {
+    const wc = wordCount(out[i]);
+    if (wc >= minWords) {
+      i += 1;
+      continue;
+    }
+    const prev = i > 0 ? out[i - 1] : null;
+    const next = i + 1 < out.length ? out[i + 1] : null;
+    const prevWc = prev ? wordCount(prev) : Infinity;
+    const nextWc = next ? wordCount(next) : Infinity;
+
+    const canPrev = prev && prevWc + wc <= hardMaxWords;
+    const canNext = next && nextWc + wc <= hardMaxWords;
+
+    if (canPrev && (!canNext || prevWc <= nextWc)) {
+      out[i - 1] = `${prev} ${out[i]}`;
+      out.splice(i, 1);
+      continue;
+    }
+    if (canNext) {
+      out[i] = `${out[i]} ${next}`;
+      out.splice(i + 1, 1);
+      continue;
+    }
+    i += 1;
+  }
+  return out;
 }
 
 function chunkLongText(text: string): string[] {

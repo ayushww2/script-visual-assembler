@@ -122,7 +122,7 @@ OUTPUT JSON ONLY
 
 export function buildDirectorUserPrompt(
   beats: Beat[],
-  phase: "google-first" | "full" = "google-first",
+  phase: "google-first" | "full" | "google-only" = "google-first",
   nicheId?: string | null,
   opts?: { batchIndex?: number; batchCount?: number; totalBeats?: number },
 ): string {
@@ -151,13 +151,26 @@ export function buildDirectorUserPrompt(
       : "";
 
   const phaseNote =
-    phase === "google-first"
-      ? `PHASE: assign Google vs AI for every beat in this batch.
+    phase === "google-only"
+      ? `PHASE: GOOGLE-ONLY (hard). Put EVERY beatId into googleSearches.relatedBeatIds.
+aiGenerate MUST be an empty array []. Never invent AI stills.
+Entity-lock each line: the Google query must name the person/place spoken in that beat.
+Vary photo angles for consecutive same-person beats (e.g. marilyn monroe portrait / marilyn monroe 1962).
+Pack relatedBeatIds=2 ONLY when the same entity continues across back-to-back beats.
+Short 2–5 word entity-first queries. No memes, quote cards, thumbnails, logos.${largeFilm}`
+      : phase === "google-first"
+        ? `PHASE: assign Google vs AI for every beat in this batch.
 Every beatId must appear exactly once across googleSearches + aiGenerate.
 NO % quota — use Google for every beat that has a real photographable subject.
 Prefer relatedBeatIds of 2 for back-to-back similar beats. Short 2–4 word queries.
 AI only when there is truly no honest real photo. More Google is better.${largeFilm}`
-      : `Produce Google + AI for every beat. Prefer Google; pack 2 scenes/query when it fits.${largeFilm}`;
+        : `Produce Google + AI for every beat. Prefer Google; pack 2 scenes/query when it fits.${largeFilm}`;
+
+  const budgetNote =
+    phase === "google-only"
+      ? `Film budget: ≤125 Google queries · 0 AI stills. Pack/reuse consecutive same-entity scenes.`
+      : `Film budget: ≤125 Google queries · ≤100 AI stills. Pack/reuse consecutive scenes.
+Prefer Google. Short direct queries. Google-first: tombs/places/people/films/manuscripts.`;
 
   return `${phaseNote}
 
@@ -167,8 +180,7 @@ SELECTED NICHE: ${niche.label} ${niche.version}
 ${niche.promptGuide}
 
 This batch: ${sceneCount} beats · ~${minutes.toFixed(2)} min @ ${niche.wpm} WPM
-Film budget: ≤125 Google queries · ≤100 AI stills. Pack/reuse consecutive scenes.
-Prefer Google. Short direct queries. Google-first: tombs/places/people/films/manuscripts.
+${budgetNote}
 
 BEATS:
 ${beatBlock}

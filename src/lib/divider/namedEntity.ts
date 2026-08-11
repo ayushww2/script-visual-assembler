@@ -23,6 +23,21 @@ const KNOWN_TITLES = [
   "calvary",
   "jerusalem",
   "governor caesar",
+  // Celebrity experiment entities (harmless for mystery)
+  "marilyn monroe",
+  "frank sinatra",
+  "tina sinatra",
+  "tony oppedisano",
+  "peter lawford",
+  "john f kennedy",
+  "john kennedy",
+  "robert kennedy",
+  "elvis presley",
+  "cal neva lodge",
+  "cal-neva",
+  "lake tahoe",
+  "brentwood",
+  "my father's daughter",
 ];
 
 /** Proper-noun-ish spans: Mel Gibson, Joe Rogan, Vatican City, etc. */
@@ -135,6 +150,20 @@ export function queryFromNamedBeat(text: string): string {
   if (/\bJesus\b/i.test(t)) return "jesus christ";
   if (/\bGibson\b/i.test(t)) return "mel gibson";
   if (/\bRogan\b/i.test(t)) return "joe rogan experience";
+  if (/\bMarilyn\b/i.test(t)) return "marilyn monroe";
+  if (/\bTina Sinatra\b/i.test(t) || /Sinatra.?s daughter/i.test(t)) {
+    return "tina sinatra";
+  }
+  if (/\bFrank\b/i.test(t) && /\bSinatra\b/i.test(t)) return "frank sinatra";
+  if (/\bSinatra\b/i.test(t)) return "frank sinatra";
+  if (/\bElvis\b/i.test(t)) return "elvis presley";
+  if (/\bLawford\b/i.test(t)) return "peter lawford";
+  if (/\bRobert Kennedy\b/i.test(t) || /\bRFK\b/i.test(t)) {
+    return "robert kennedy";
+  }
+  if (/\bKennedy\b/i.test(t) || /\bJFK\b/i.test(t)) return "john f kennedy";
+  if (/\bTahoe\b/i.test(t)) return "lake tahoe";
+  if (/Cal[\s-]?Neva/i.test(t)) return "cal neva lodge";
 
   return t
     .replace(/[^\w\s'-]/g, " ")

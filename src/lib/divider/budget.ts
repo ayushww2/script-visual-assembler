@@ -27,6 +27,13 @@ function beatNum(id: string): number {
   return m ? Number(m[1]) : Number.MAX_SAFE_INTEGER;
 }
 
+export type VisualBudgetOptions = {
+  maxGoogle?: number;
+  maxAi?: number;
+  /** Beats packed onto one Google query (1 = unique query preference). */
+  perQuery?: number;
+};
+
 /**
  * Cap Google queries (≤125) and AI stills (≤100).
  * Prefer ~2 beats per Google query (esp. 350–400 scene films).
@@ -35,10 +42,14 @@ function beatNum(id: string): number {
 export function applyVisualBudget(
   beats: Beat[],
   result: DividerResult,
+  opts?: VisualBudgetOptions,
 ): DividerResult {
-  const maxGoogle = MAX_GOOGLE_QUERIES_PER_JOB;
-  const maxAi = MAX_AI_STILLS_PER_JOB;
-  const perQuery = GOOGLE_BEATS_PER_QUERY;
+  const maxGoogle = Math.max(
+    1,
+    opts?.maxGoogle ?? MAX_GOOGLE_QUERIES_PER_JOB,
+  );
+  const maxAi = Math.max(0, opts?.maxAi ?? MAX_AI_STILLS_PER_JOB);
+  const perQuery = Math.max(1, opts?.perQuery ?? GOOGLE_BEATS_PER_QUERY);
 
   let google = result.googleSearches.map((p) => ({
     ...p,
