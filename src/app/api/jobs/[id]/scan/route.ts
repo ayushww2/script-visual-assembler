@@ -67,12 +67,14 @@ export async function POST(
       limit !== undefined
         ? withImages.slice(start, start + limit)
         : withImages.slice(start);
+    const topic = job.title || undefined;
     const result =
       mode === "text"
-        ? await scanAllScenesText(slice, { batchSize: 10, concurrency: 1 })
+        ? await scanAllScenesText(slice, { batchSize: 10, concurrency: 1, topic })
         : await scanAllScenes(slice, {
             batchSize: Math.min(3, slice.length || 1),
             concurrency: 1,
+            topic,
           });
 
     return NextResponse.json({

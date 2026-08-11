@@ -12,7 +12,19 @@ export type SceneScanInput = {
   visualSource?: string;
   subject?: string;
   query?: string;
+  /** Neighboring narration lines — gives the model story continuity, not just an isolated sentence. */
+  prevWords?: string;
+  nextWords?: string;
 };
+
+/** Attach prevWords/nextWords from array order so batches keep narrative context even when split. */
+export function withNeighborContext<T extends SceneScanInput>(scenes: T[]): T[] {
+  return scenes.map((s, i) => ({
+    ...s,
+    prevWords: i > 0 ? scenes[i - 1].words : undefined,
+    nextWords: i < scenes.length - 1 ? scenes[i + 1].words : undefined,
+  }));
+}
 
 export type SceneScanIssue = {
   sceneId: string;
@@ -37,9 +49,13 @@ export type SceneScanResult = {
 
 const SCAN_SYSTEM = `You are a documentary visual QA reviewer for YouTube Mystery films.
 
-For each scene you receive sceneId, spoken narration (words), and a still image.
+You receive the film TOPIC (title), then for each scene: sceneId, the previous
+line, the current spoken narration (words), the next line, and a still image.
 
-Judge whether the still honestly supports what is being said RIGHT NOW.
+Judge whether the still honestly supports what is being said RIGHT NOW —
+using the previous/next lines only for story continuity, and the TOPIC to
+catch drift (B-roll that doesn't belong in THIS film at all, even if it would
+look fine in a different documentary).
 
 Flag problems such as:
 - wrong person (e.g. Andrew Garfield instead of Mel Gibson)
@@ -48,6 +64,7 @@ Flag problems such as:
 - CGI / 3D sculpt / digital art instead of documentary photo
 - empty chair / vacant interview prop when narration is about a person or event
 - place/artifact mismatch (wrong location, wrong film still, unrelated B-roll)
+- topic drift — image is unrelated to the film's TOPIC even if plausible narration-only
 - readable text overlays that dominate the frame
 - dual-person collage when beat is about one person
 
@@ -91,6 +108,7 @@ export async function scanSceneBatch(
   scenes: SceneScanInput[],
   batchIndex: number,
   batchCount: number,
+  topic?: string,
 ): Promise<{
   reviews: SceneScanIssue[];
   usage: { inputTokens: number; outputTokens: number };
@@ -105,14 +123,21 @@ export async function scanSceneBatch(
   > = [
     {
       type: "text",
-      text: `Batch ${batchIndex + 1}/${batchCount}. Review ${scenes.length} scene(s). Read words then inspect each image.\n`,
+      text: `TOPIC: ${topic || "(unknown)"}\nBatch ${batchIndex + 1}/${batchCount}. Review ${scenes.length} scene(s). Read words then inspect each image.\n`,
     },
   ];
 
   for (const scene of scenes) {
+    const context = [
+      scene.prevWords ? `prev: ${scene.prevWords}` : null,
+      `words: ${scene.words}`,
+      scene.nextWords ? `next: ${scene.nextWords}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
     userContent.push({
       type: "text",
-      text: `\n--- sceneId=${scene.sceneId} index=${scene.index} ---\nwords: ${scene.words}\n`,
+      text: `\n--- sceneId=${scene.sceneId} index=${scene.index} ---\n${context}\n`,
     });
     const dataUrl = await imageToDataUrl(scene.imageUrl);
     userContent.push({
@@ -192,6 +217,7 @@ export async function scanSceneBatchText(
   scenes: SceneScanInput[],
   batchIndex: number,
   batchCount: number,
+  topic?: string,
 ): Promise<{
   reviews: SceneScanIssue[];
   usage: { inputTokens: number; outputTokens: number };
@@ -200,10 +226,16 @@ export async function scanSceneBatchText(
   const { model } = getContactBoxConfig();
   const client = createContactBoxClient();
 
-  const lines = scenes.map(
-    (s) =>
-      `sceneId=${s.sceneId} index=${s.index}\nwords: ${s.words}\nsource: ${s.visualSource || "?"} · subject: ${s.subject || "—"} · query: ${s.query || "—"}\nimageUrl: ${s.imageUrl}`,
-  );
+  const lines = scenes.map((s) => {
+    const context = [
+      s.prevWords ? `prev: ${s.prevWords}` : null,
+      `words: ${s.words}`,
+      s.nextWords ? `next: ${s.nextWords}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    return `sceneId=${s.sceneId} index=${s.index}\n${context}\nsource: ${s.visualSource || "?"} · subject: ${s.subject || "—"} · query: ${s.query || "—"}\nimageUrl: ${s.imageUrl}`;
+  });
 
   const completion = await client.chat.completions.create({
     model,
@@ -217,7 +249,7 @@ export async function scanSceneBatchText(
       },
       {
         role: "user",
-        content: `Batch ${batchIndex + 1}/${batchCount}. Review ${scenes.length} scenes (metadata only):\n\n${lines.join("\n\n---\n\n")}`,
+        content: `TOPIC: ${topic || "(unknown)"}\nBatch ${batchIndex + 1}/${batchCount}. Review ${scenes.length} scenes (metadata only):\n\n${lines.join("\n\n---\n\n")}`,
       },
     ],
   });
@@ -270,13 +302,14 @@ export async function scanSceneBatchText(
 
 export async function scanAllScenesText(
   scenes: SceneScanInput[],
-  opts?: { batchSize?: number; concurrency?: number },
+  opts?: { batchSize?: number; concurrency?: number; topic?: string },
 ): Promise<SceneScanResult> {
   const batchSize = Math.max(1, opts?.batchSize ?? 10);
   const concurrency = Math.max(1, opts?.concurrency ?? 1);
+  const withContext = withNeighborContext(scenes);
   const batches: SceneScanInput[][] = [];
-  for (let i = 0; i < scenes.length; i += batchSize) {
-    batches.push(scenes.slice(i, i + batchSize));
+  for (let i = 0; i < withContext.length; i += batchSize) {
+    batches.push(withContext.slice(i, i + batchSize));
   }
 
   let inputTokens = 0;
@@ -288,7 +321,7 @@ export async function scanAllScenesText(
     const slice = batches.slice(i, i + concurrency);
     const results = await Promise.all(
       slice.map((batch, offset) =>
-        scanSceneBatchText(batch, i + offset, batches.length),
+        scanSceneBatchText(batch, i + offset, batches.length, opts?.topic),
       ),
     );
     for (const r of results) {
@@ -316,14 +349,15 @@ export async function scanAllScenesText(
 /** Vision-scan scenes in batches (default 1 scene / call for reliability). */
 export async function scanAllScenes(
   scenes: SceneScanInput[],
-  opts?: { batchSize?: number; concurrency?: number },
+  opts?: { batchSize?: number; concurrency?: number; topic?: string },
 ): Promise<SceneScanResult> {
   const batchSize = Math.max(1, opts?.batchSize ?? 1);
   const concurrency = Math.max(1, opts?.concurrency ?? 1);
+  const withContext = withNeighborContext(scenes);
 
   const batches: SceneScanInput[][] = [];
-  for (let i = 0; i < scenes.length; i += batchSize) {
-    batches.push(scenes.slice(i, i + batchSize));
+  for (let i = 0; i < withContext.length; i += batchSize) {
+    batches.push(withContext.slice(i, i + batchSize));
   }
 
   let inputTokens = 0;
@@ -335,7 +369,7 @@ export async function scanAllScenes(
     const slice = batches.slice(i, i + concurrency);
     const results = await Promise.all(
       slice.map((batch, offset) =>
-        scanSceneBatch(batch, i + offset, batches.length),
+        scanSceneBatch(batch, i + offset, batches.length, opts?.topic),
       ),
     );
     for (const r of results) {
