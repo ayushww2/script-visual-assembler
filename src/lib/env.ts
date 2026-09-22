@@ -22,6 +22,11 @@ export function getSearchApiKey(): string {
   return process.env.SEARCHAPI_API_KEY || process.env.GOOGLE_SEARCH_API_KEY || "";
 }
 
+/** YouTube Data API v3 — search + metadata only (no video download). */
+export function getYouTubeApiKey(): string {
+  return process.env.YOUTUBE_API_KEY || process.env.GOOGLE_YOUTUBE_API_KEY || "";
+}
+
 export function getSearchDefaults() {
   return {
     aspectRatio: process.env.SEARCH_ASPECT_RATIO || "wide",

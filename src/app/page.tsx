@@ -175,6 +175,50 @@ type Capacity = {
   remaining: number;
 };
 
+type YouTubeClipSuggestion = {
+  videoId: string;
+  title: string;
+  channelTitle: string;
+  thumbnailUrl?: string;
+  watchUrl: string;
+  watchAtUrl: string;
+  startSec: number;
+  endSec: number;
+  durationSec: number;
+  matchedText: string;
+  score: number;
+  hasCaptions: boolean;
+};
+
+type SceneYouTubeSuggestions = {
+  sceneId: string;
+  index: number;
+  words: string;
+  query: string;
+  targetClipSec: number;
+  suggestions: YouTubeClipSuggestion[];
+  note?: string;
+};
+
+type HeroClipPick = {
+  index: number;
+  words: string;
+  useVideo: boolean;
+  reason: string;
+  visualHint: string;
+  clip: YouTubeClipSuggestion | null;
+  aiVerdict?: string;
+  note?: string;
+};
+
+type HeroYouTubePlan = {
+  heroName: string;
+  aliases: string[];
+  videoLineCount: number;
+  imageOnlyCount: number;
+  picks: HeroClipPick[];
+};
+
 type DayGroup = {
   key: string;
   label: string;
@@ -1859,13 +1903,87 @@ function JobDetailView({
   );
   const [clientScanning, setClientScanning] = useState(false);
   const [clientProgress, setClientProgress] = useState<string | null>(null);
+  const [ytByScene, setYtByScene] = useState<
+    Record<string, SceneYouTubeSuggestions | undefined>
+  >({});
+  const [ytLoading, setYtLoading] = useState<string | null>(null);
+  const [ytError, setYtError] = useState<string | null>(null);
+  const [heroPlan, setHeroPlan] = useState<HeroYouTubePlan | null>(null);
+  const [heroLoading, setHeroLoading] = useState(false);
 
   useEffect(() => {
     setClientReview(loadClientScan(detail.id));
+    setYtByScene({});
+    setYtError(null);
+    setHeroPlan(null);
   }, [detail.id]);
 
   function toggleScene(id: string) {
     setExpandedId((current) => (current === id ? null : id));
+  }
+
+  async function loadHeroYouTubePlan() {
+    setHeroLoading(true);
+    setYtError(null);
+    try {
+      const res = await fetch(`/api/jobs/${detail.id}/youtube-clips`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "hero" }),
+      });
+      const json = (await res.json()) as {
+        error?: string;
+        heroName?: string;
+        aliases?: string[];
+        videoLineCount?: number;
+        imageOnlyCount?: number;
+        picks?: HeroClipPick[];
+      };
+      if (!res.ok) throw new Error(json.error || "Hero YouTube plan failed");
+      setHeroPlan({
+        heroName: json.heroName || "Subject",
+        aliases: json.aliases || [],
+        videoLineCount: json.videoLineCount || 0,
+        imageOnlyCount: json.imageOnlyCount || 0,
+        picks: json.picks || [],
+      });
+    } catch (err) {
+      setYtError(
+        err instanceof Error ? err.message : "Hero YouTube plan failed",
+      );
+    } finally {
+      setHeroLoading(false);
+    }
+  }
+
+  async function loadYouTubeSuggestions(scene: Scene) {
+    const key = sceneIdOf(scene);
+    setYtLoading(key);
+    setYtError(null);
+    try {
+      const res = await fetch(`/api/jobs/${detail.id}/youtube-clips`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "scene",
+          indexes: [scene.index],
+          maxVideos: 4,
+        }),
+      });
+      const json = (await res.json()) as {
+        error?: string;
+        results?: SceneYouTubeSuggestions[];
+      };
+      if (!res.ok) throw new Error(json.error || "YouTube suggestions failed");
+      const row = json.results?.[0];
+      if (row) {
+        setYtByScene((prev) => ({ ...prev, [key]: row }));
+      }
+    } catch (err) {
+      setYtError(err instanceof Error ? err.message : "YouTube suggestions failed");
+    } finally {
+      setYtLoading(null);
+    }
   }
 
   const packageUrl = detail.packageUrl || null;
@@ -2030,11 +2148,39 @@ function JobDetailView({
         </h3>
         <p className="mt-2 text-sm text-[var(--ink-soft)]">
           Images stay minimized. Click a scene to maximize it — only one open at
-          a time.
+          a time. Use <strong>Plan hero YouTube clips</strong> for unique ~4s
+          timestamps across the whole script (hero on camera only). Per-scene{" "}
+          <strong>Find YouTube clips</strong> is also available. Links only —
+          nothing is downloaded.
           {scenes.some((s) => s.videoUrl)
             ? " Scenes with a Pexels badge have a B-roll clip."
             : ""}
         </p>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void loadHeroYouTubePlan()}
+            disabled={heroLoading}
+            className="rounded-lg border border-[rgba(96,165,250,0.45)] bg-[rgba(59,130,246,0.15)] px-3 py-2 text-sm font-semibold text-[var(--blue-bright)] transition hover:bg-[rgba(59,130,246,0.25)] disabled:opacity-50"
+          >
+            {heroLoading ? "Planning hero clips…" : "Plan hero YouTube clips"}
+          </button>
+          {heroPlan ? (
+            <p className="text-sm text-[var(--ink-soft)]">
+              Hero: {heroPlan.heroName} · video {heroPlan.videoLineCount} ·
+              images {heroPlan.imageOnlyCount}
+            </p>
+          ) : null}
+        </div>
+
+        {ytError ? (
+          <p className="mt-3 text-sm text-[var(--danger)]">{ytError}</p>
+        ) : null}
+
+        {heroPlan ? (
+          <HeroYouTubePlanPanel plan={heroPlan} />
+        ) : null}
 
         {scenes.length === 0 ? (
           <p className="mt-6 text-[var(--ink-soft)]">No scenes yet.</p>
@@ -2152,6 +2298,17 @@ function JobDetailView({
                             <p className="text-sm text-white/85">{scene.why}</p>
                           </Field>
                         ) : null}
+
+                        <YouTubeClipSuggestionsPanel
+                          scene={scene}
+                          loading={ytLoading === sid}
+                          result={ytByScene[sid]}
+                          heroPick={
+                            heroPlan?.picks.find((p) => p.index === scene.index) ||
+                            null
+                          }
+                          onFind={() => void loadYouTubeSuggestions(scene)}
+                        />
                       </div>
 
                       <div className="min-w-0 space-y-3 rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-3 sm:p-4">
@@ -2231,6 +2388,144 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
         {label}
       </p>
       <div className="mt-2">{children}</div>
+    </div>
+  );
+}
+
+function formatTs(sec: number) {
+  const s = Math.max(0, Math.floor(sec));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, "0")}`;
+}
+
+function YouTubeClipSuggestionsPanel({
+  scene,
+  loading,
+  result,
+  heroPick,
+  onFind,
+}: {
+  scene: Scene;
+  loading: boolean;
+  result?: SceneYouTubeSuggestions;
+  heroPick?: HeroClipPick | null;
+  onFind: () => void;
+}) {
+  return (
+    <div className="rounded-xl border border-[var(--line)] bg-[var(--panel-2)] p-3 sm:p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[11px] font-semibold tracking-[0.16em] text-[var(--ink-soft)] uppercase">
+          YouTube timestamps
+        </p>
+        <button
+          type="button"
+          onClick={onFind}
+          disabled={loading}
+          className="rounded-md border border-[rgba(96,165,250,0.35)] px-2.5 py-1 text-xs font-semibold text-[var(--blue-bright)] transition hover:bg-[rgba(59,130,246,0.12)] disabled:opacity-50"
+        >
+          {loading ? "Searching…" : "Find YouTube clips"}
+        </button>
+      </div>
+
+      {heroPick ? (
+        <div className="mt-3 space-y-2 border-b border-[var(--line)] pb-3">
+          <p className="text-xs text-[var(--ink-soft)]">
+            Hero plan · {heroPick.useVideo ? "video" : "images only"}
+            {heroPick.aiVerdict ? ` · ${heroPick.aiVerdict}` : ""}
+          </p>
+          {heroPick.useVideo && heroPick.clip ? (
+            <a
+              href={heroPick.clip.watchAtUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="block text-sm text-[var(--blue-bright)] hover:text-white"
+            >
+              {formatTs(heroPick.clip.startSec)}–
+              {formatTs(heroPick.clip.endSec)} · {heroPick.clip.title}
+            </a>
+          ) : (
+            <p className="text-sm text-[var(--ink-soft)]">
+              {heroPick.note || heroPick.reason}
+            </p>
+          )}
+        </div>
+      ) : null}
+
+      {result?.note ? (
+        <p className="mt-3 text-xs text-[var(--ink-soft)]">{result.note}</p>
+      ) : null}
+
+      {result?.suggestions?.length ? (
+        <ul className="mt-3 space-y-2">
+          {result.suggestions.slice(0, 4).map((s) => (
+            <li key={`${s.videoId}-${s.startSec}`}>
+              <a
+                href={s.watchAtUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="block text-sm text-[var(--blue-bright)] hover:text-white"
+              >
+                {formatTs(s.startSec)}–{formatTs(s.endSec)} · {s.title}
+              </a>
+              {s.matchedText ? (
+                <p className="mt-0.5 line-clamp-2 text-xs text-[var(--ink-soft)]">
+                  {s.matchedText}
+                </p>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : !heroPick && !loading ? (
+        <p className="mt-3 text-sm text-[var(--ink-soft)]">
+          No per-scene suggestions yet for scene {scene.index}.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function HeroYouTubePlanPanel({ plan }: { plan: HeroYouTubePlan }) {
+  return (
+    <div className="mt-5 rounded-2xl border border-[rgba(96,165,250,0.35)] bg-[rgba(59,130,246,0.08)] p-4 sm:p-5">
+      <p className="text-xs font-semibold tracking-[0.18em] text-[var(--blue-bright)] uppercase">
+        Hero clip plan · {plan.heroName}
+      </p>
+      <p className="mt-2 text-sm text-[var(--ink-soft)]">
+        Unique ~4s windows. Open a link, scrub the suggested start, cut 4
+        seconds. Other people / movies stay images-only.
+      </p>
+      <ul className="mt-4 max-h-[28rem] space-y-3 overflow-y-auto pr-1">
+        {plan.picks.map((p) => (
+          <li
+            key={p.index}
+            className="border-t border-[var(--line)] pt-3 first:border-t-0 first:pt-0"
+          >
+            <p className="text-xs font-semibold text-white/70">
+              L{p.index} · {p.useVideo ? "VIDEO" : "IMAGES"}
+            </p>
+            <p className="mt-1 text-sm text-white/90">{p.words}</p>
+            {p.useVideo && p.clip ? (
+              <a
+                href={p.clip.watchAtUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1 block text-sm text-[var(--blue-bright)] hover:text-white"
+              >
+                {formatTs(p.clip.startSec)}–{formatTs(p.clip.endSec)} ·{" "}
+                {p.clip.title}
+              </a>
+            ) : (
+              <p className="mt-1 text-xs text-[var(--ink-soft)]">
+                {p.note || p.reason}
+              </p>
+            )}
+            {p.aiVerdict ? (
+              <p className="mt-1 text-xs text-[var(--ink-soft)]">{p.aiVerdict}</p>
+            ) : null}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
