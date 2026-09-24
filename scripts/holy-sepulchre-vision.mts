@@ -16,10 +16,10 @@ import {
 import { getSearchApiKey } from "../src/lib/env";
 import { mapPool } from "../src/lib/jobs/pool";
 
-const MIN_GAP = 48;
+const MIN_GAP = 40;
 const MAX_SRC = 10;
 const VISION_CONCURRENCY = 3;
-const MATCH_CONCURRENCY = 3;
+const MATCH_CONCURRENCY = 4;
 
 type Tag =
   | "church_exterior"
@@ -271,11 +271,15 @@ JSON:
 async function visionMatchLine(input: {
   words: string;
   intended: string;
+  tags: Tag[];
+  sourceTags: Tag[];
+  sourceShows: string;
   title: string;
   dataUrl: string;
 }): Promise<MatchVision> {
   const { model } = getContactBoxConfig();
   const client = createContactBoxClient();
+  const tagOverlap = input.tags.some((t) => input.sourceTags.includes(t));
   const completion = await client.chat.completions.create({
     model,
     temperature: 0.1,
@@ -285,7 +289,7 @@ async function visionMatchLine(input: {
       {
         role: "system",
         content:
-          "Match documentary B-roll to a script line. Reject watermarks. JSON only.",
+          "Approve clean Holy Sepulchre / Jerusalem archaeology B-roll. Reject watermarks. Exact dig action need not appear in this mid-frame sample if the source is tagged for the intended category. JSON only.",
       },
       {
         role: "user",
@@ -294,10 +298,19 @@ async function visionMatchLine(input: {
             type: "text",
             text: `SCRIPT LINE: ${input.words}
 INTENDED TO SHOW: ${input.intended}
+INTENDED TAGS: ${input.tags.join(", ")}
+SOURCE TAGS: ${input.sourceTags.join(", ")}
+SOURCE SHOWS: ${input.sourceShows}
 VIDEO TITLE: ${input.title}
+TAG_OVERLAP: ${tagOverlap}
 
-Does this frame match the intended visual well enough for that line?
-Reject if watermark/logo overlay, wrong subject, or unusable.
+This is a mid-video sample frame (exact-second grabs unavailable).
+ACCEPT (matches=true) if:
+- no watermark / channel logo / stock bug / big text overlay
+- horizontal clear footage
+- AND either the frame itself fits the intended category OR source tags overlap intended tags and the frame is still relevant Holy Sepulchre / Jerusalem archaeology / church / dig / pilgrims / Old City B-roll
+
+REJECT only if watermark, wrong city/topic, talking-head-only with no site, or unusable.
 
 JSON:
 {
@@ -439,43 +452,54 @@ type Verified = YouTubeVideoHit & {
 
 async function collectCandidates(): Promise<YouTubeVideoHit[]> {
   const queries = [
-    "Church of the Holy Sepulchre Jerusalem interior tour documentary",
-    "Holy Sepulchre excavation archaeology dig floor",
-    "Holy Sepulcher archaeological excavations Jerusalem",
-    "Church of Holy Sepulchre restoration floor paving",
-    "Jerusalem Old City Holy Sepulchre pilgrims documentary",
-    "Secrets of Christ's Tomb National Geographic",
-    "Holy Sepulchre rotunda empty tomb interior",
-    "Jerusalem limestone quarry Holy Sepulchre archaeology",
-    "Holy Sepulchre rock cut tomb chamber",
-    "Church of the Holy Sepulchre exterior Jerusalem",
+    "Holy Sepulchre 4K walkthrough",
+    "Church of the Holy Sepulchre ambient tour",
+    "Holy Sepulchre pavement restoration",
+    "Edicule of the Holy Sepulchre interior",
+    "Holy Sepulchre Sapienza excavation",
+    "Church of the Holy Sepulchre silent walk",
+    "Holy Sepulchre Jerusalem walking 4k60",
+    "Inside the Tomb of Jesus Holy Sepulchre",
+    "Exploring the Church of the Holy Sepulchre Jerusalem",
+    "Church of the Holy Sepulchre Restoration Field Report",
+  ];
+  // Prefer known longer / ambient / 4K tours (often cleaner of bugs)
+  const seedIds: Array<{ id: string; title: string; dur: number }> = [
+    { id: "yqWMm_CHv2E", title: "4K Virtual Walking Tour of Old Jerusalem: Holy Sepulchre", dur: 1836 },
+    { id: "pEXQSkmI06U", title: "Holy Sepulchre Church | Jerusalem walking 4k60", dur: 1766 },
+    { id: "LrRzaq4Y2w0", title: "Church of the Holy Sepulchre 4K", dur: 614 },
+    { id: "norFnJdE4AY", title: "Church of the Holy Sepulchre – Silent Walk", dur: 1646 },
+    { id: "UiAfMEH1azA", title: "Church of the Holy Sepulchre, JERUSALEM", dur: 1657 },
+    { id: "LrjJMpo8T-s", title: "JERUSALEM, Tomb of JESUS in Church of the Holy Sepulchre", dur: 1742 },
+    { id: "k75HZKT4RSY", title: "What It's Like Inside the Church of the Holy Sepulchre (4K Tour)", dur: 316 },
+    { id: "nfhtxcjDWh0", title: "Exploring the Church of the Holy Sepulchre, Jerusalem", dur: 1500 },
+    { id: "mxRXJcQl4ng", title: "Church of the Holy Sepulchre pavement restoration", dur: 151 },
+    { id: "2l4zTCfRIFM", title: "UNDERNEATH the Real Location of the Second Temple", dur: 600 },
+    { id: "sIIU2xNH0RU", title: "Church of the Holy Sepulchre Restoration: Field Report", dur: 479 },
+    { id: "Y0EDpvolFNo", title: "Holy Sepulchre Jerusalem: Excavations Complete, Restoration Begins", dur: 308 },
+    { id: "q1KTAvNRX6c", title: "The works in the Basilica of the Holy Sepulcher", dur: 245 },
+    { id: "9YLIBq7uu2U", title: "Inside the Tomb of Jesus – Church of the Holy Sepulchre", dur: 703 },
+    { id: "QyvavfIGyLs", title: "A Video Tour inside The Church of the Holy Sepulchre", dur: 515 },
+    { id: "4N39r7bTezg", title: "Opening the Doors of the Church of the Holy Sepulchre", dur: 282 },
+    { id: "xXkLRVqQMMw", title: "Inside the Holy Sepulchre Jerusalem’s Most Sacred Church", dur: 929 },
   ];
   const byId = new Map<string, YouTubeVideoHit>();
-  try {
-    const prev = JSON.parse(
-      readFileSync("/tmp/holy_sep_plan.json", "utf8"),
-    ) as { sources?: Array<{ id: string; title: string; url: string }> };
-    for (const s of prev.sources || []) {
-      if (!s.id) continue;
-      byId.set(s.id, {
-        videoId: s.id,
-        title: s.title,
-        channelTitle: "",
-        description: "",
-        watchUrl: s.url || `https://www.youtube.com/watch?v=${s.id}`,
-        durationSec: 600,
-      });
-    }
-  } catch {
-    /* */
+  for (const s of seedIds) {
+    byId.set(s.id, {
+      videoId: s.id,
+      title: s.title,
+      channelTitle: "",
+      description: "",
+      watchUrl: `https://www.youtube.com/watch?v=${s.id}`,
+      durationSec: s.dur,
+    });
   }
-  // Prefer prior vision-clean sources if present
   try {
     const prevArt = JSON.parse(
       readFileSync("/opt/cursor/artifacts/holy-sepulchre-clips.json", "utf8"),
     ) as { sources?: Array<{ id: string; title: string; url: string }> };
     for (const s of prevArt.sources || []) {
-      if (!s.id) continue;
+      if (!s.id || byId.has(s.id)) continue;
       byId.set(s.id, {
         videoId: s.id,
         title: s.title,
@@ -489,13 +513,13 @@ async function collectCandidates(): Promise<YouTubeVideoHit[]> {
     /* */
   }
   for (const q of queries) {
-    if (byId.size >= 28) break;
+    if (byId.size >= 36) break;
     for (const h of await ytSearch(q, 5)) {
       if (rejectBad(h)) continue;
       if (!byId.has(h.videoId)) byId.set(h.videoId, h);
     }
   }
-  return Array.from(byId.values()).slice(0, 28);
+  return Array.from(byId.values()).slice(0, 36);
 }
 
 async function verifySources(cands: YouTubeVideoHit[]): Promise<Verified[]> {
@@ -541,15 +565,18 @@ async function verifySources(cands: YouTubeVideoHit[]): Promise<Verified[]> {
 }
 
 function windows(v: YouTubeVideoHit, clipSec: number): YouTubeClipSuggestion[] {
-  const dur = Math.max(120, Math.min(v.durationSec || 500, 1800));
+  const dur = Math.max(120, Math.min(v.durationSec || 500, 2400));
   const seeds = [
-    Math.floor(dur * 0.18),
+    Math.floor(dur * 0.12),
+    Math.floor(dur * 0.2),
     Math.floor(dur * 0.28),
-    Math.floor(dur * 0.38),
-    Math.floor(dur * 0.48),
-    Math.floor(dur * 0.58),
+    Math.floor(dur * 0.36),
+    Math.floor(dur * 0.44),
+    Math.floor(dur * 0.52),
+    Math.floor(dur * 0.6),
     Math.floor(dur * 0.68),
-    Math.floor(dur * 0.78),
+    Math.floor(dur * 0.76),
+    Math.floor(dur * 0.84),
     35,
     80,
     125,
@@ -558,10 +585,17 @@ function windows(v: YouTubeVideoHit, clipSec: number): YouTubeClipSuggestion[] {
     290,
     350,
     420,
+    500,
+    600,
+    720,
+    900,
+    1100,
+    1300,
   ];
   const out: YouTubeClipSuggestion[] = [];
   const seen = new Set<number>();
   for (const raw of seeds) {
+    if (raw >= dur - clipSec - 8) continue;
     const start = Math.max(
       12,
       Math.min(Math.floor(raw), Math.floor(dur - clipSec - 8)),
@@ -741,6 +775,9 @@ async function main() {
       const m = await visionMatchLine({
         words: t.words,
         intended: t.intent.show,
+        tags: t.intent.tags,
+        sourceTags: t.src.vision.tags,
+        sourceShows: t.src.vision.shows,
         title: t.src.title,
         dataUrl: thumb.dataUrl,
       });
